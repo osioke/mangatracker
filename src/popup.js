@@ -92,6 +92,65 @@
     try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
   }
 
+  // ── Detect media type from hostname ───────────────────────────────────────
+  // Checks the site's domain against known patterns so the Type field is
+  // pre-filled when you open the extension on a reading site.
+  const SITE_TYPE_MAP = {
+    // Manhwa / Korean webtoon sites
+    manhwa: [
+      'manhwatop','manhwax','manhwaz','manhwasy','manhwaclan','manhwafreaks',
+      'manhwabuddy','manhwatv','manhwakid','manhwahentai','manhwa18','levelmanga',
+      'webtoon','webtoons','tapas','lezhin','myntoon','toonily','toonspur',
+      'manhwascan','manhwaland','manhwanelo','readmanhwa','manhwaplanet',
+      'manhuascan','10moons','disasterscans','asurascans','asuratoon',
+      'luminous','luminousscans','reaperscans','reaper','flamescans','flame',
+      'bato','batoto','isekaiscan','void-scans','voidscans','nitroscans',
+      'mangaclash','mangapuma','kunmanga','manhwahub','drakecomic',
+    ],
+    // Manga / Japanese
+    manga: [
+      'mangadex','mangaplus','viz','shonenjump','mangakakalot','manganelo',
+      'mangahere','mangafox','mangareader','mangapark','mangastream',
+      'mangachan','mangafreak','mangago','mangahasu','mangainn','mangajoy',
+      'mangalib','mangalichter','manganato','mangaonline','mangapill',
+      'mangasee','mangashiro','mangaslayer','mangasushi','mangaworld',
+      'nyxscans','nitropics','tcbscans','rawkuma','rawlh','alphascans',
+      'hatigarmscans','kaguya','sushiscan','mangabuddy','rawdevart',
+    ],
+    // Manhua / Chinese
+    manhua: [
+      'manhua','manhualike','manhuadb','manhuaes','manhuafast','manhuafree',
+      'manhuaplus','manhuascan','manhuatop','manhuazone','webcomics',
+      'bilibili','bilibilicomics','kuaikanmanhua','u17','dmzj','iqingge',
+      'copymanga','mangaowl','readmanhua','1stkissnovel','zinmanga',
+      'comick','comickfun','manhuaonline',
+    ],
+    // Anime
+    anime: [
+      'myanimelist','anilist','crunchyroll','funimation','hidive','netflix',
+      'primevideo','animepahe','gogoanime','zoro','zoroanime','aniwatch',
+      'aniwatchtv','9anime','kissanime','animixplay','animeultima',
+      'animehaven','animedao','animeland','animelab','animetosho',
+      'anidb','anichart','animeschedule',
+    ],
+  };
+
+  function detectTypeFromHostname(hostname) {
+    if (!hostname) return null;
+    const h = hostname.toLowerCase();
+    for (const [type, patterns] of Object.entries(SITE_TYPE_MAP)) {
+      for (const p of patterns) {
+        if (h.includes(p)) return type;
+      }
+    }
+    // Fallback: keyword scan on the hostname itself
+    if (h.includes('manhwa')) return 'manhwa';
+    if (h.includes('manhua')) return 'manhua';
+    if (h.includes('manga'))  return 'manga';
+    if (h.includes('anime') || h.includes('webtoon')) return 'anime';
+    return null;
+  }
+
   // ── Data load ──────────────────────────────────────────────────────────────
   async function loadAll() {
     [state.entries, state.sites, state.settings] = await Promise.all([
@@ -425,6 +484,12 @@
     if ($('detect-name')) $('detect-name').textContent = info.title || '—';
     if ($('detect-site')) $('detect-site').textContent = info.hostname || '—';
     if ($('f-title') && !$('f-title').dataset.edited) $('f-title').value = info.title || '';
+
+    // Auto-set the Type dropdown from the site's hostname
+    const detectedType = detectTypeFromHostname(info.hostname);
+    if (detectedType && $('f-type') && !state.editId) {
+      $('f-type').value = detectedType;
+    }
 
     // Auto-set cover art preview from og:image if no upload yet
     if (!state.uploadedImageData && info.image) {

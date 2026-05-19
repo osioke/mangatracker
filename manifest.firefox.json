@@ -20,7 +20,10 @@
     "storage",
     "tabs",
     "activeTab",
-    "<all_urls>"
+    "<all_urls>",
+    "https://identitytoolkit.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://firestore.googleapis.com/*"
   ],
   "background": {
     "scripts": ["src/background.js"],
