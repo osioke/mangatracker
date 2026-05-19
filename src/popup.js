@@ -561,6 +561,8 @@
     state.entries = await Storage.getEntries();
     state.sites   = await Storage.getSites();
     showToast(state.editId ? 'Updated' : 'Saved to library');
+    // ── Auto-push to cloud whenever signed in ────────────────────────────────
+    if (state.syncUser) Sync.scheduleAutoPush();
     state.editId = null;
     resetAddForm();
     switchNav('library');
@@ -698,6 +700,8 @@
       await Storage.saveEntry(entry);
       state.entries = await Storage.getEntries();
       showToast(`Marked ${ch} ${tempCh}`);
+      // ── Auto-push to cloud whenever signed in ──────────────────────────────
+      if (state.syncUser) Sync.scheduleAutoPush();
       closeModal();
       renderCurrentPanel();
     });
@@ -709,6 +713,8 @@
       state.entries = await Storage.getEntries();
       closeModal();
       showToast('Deleted');
+      // ── Auto-push to cloud whenever signed in ──────────────────────────────
+      if (state.syncUser) Sync.scheduleAutoPush();
       renderCurrentPanel();
     });
     $('detail-modal').classList.add('open');
@@ -867,14 +873,17 @@
     $('s-cook')?.addEventListener('change', async () => {
       state.settings.cookThreshold = parseInt($('s-cook').value) || 10;
       await Storage.saveSettings(state.settings);
+      if (state.syncUser) Sync.scheduleAutoPush();
     });
     $('s-uptodate')?.addEventListener('change', async () => {
       state.settings.showUpToDate = $('s-uptodate').checked;
       await Storage.saveSettings(state.settings);
+      if (state.syncUser) Sync.scheduleAutoPush();
     });
     $('s-defmode')?.addEventListener('change', async () => {
       state.settings.defaultMode = $('s-defmode').value;
       await Storage.saveSettings(state.settings);
+      if (state.syncUser) Sync.scheduleAutoPush();
     });
     $('export-btn')?.addEventListener('click',  exportData);
     $('import-btn')?.addEventListener('click',  () => $('import-file')?.click());

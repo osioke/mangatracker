@@ -2,33 +2,43 @@
  * MangaTracker — Firebase Sync
  *
  * Uses the Firestore REST API directly (no npm, no bundler, works in extensions).
- *
- * ── SETUP ────────────────────────────────────────────────────────────────────
- * 1. Go to https://console.firebase.google.com
- * 2. Create a project (free Spark plan is fine)
- * 3. Add a Web app to the project
- * 4. Go to Firestore Database → Create database (start in test mode for now)
- * 5. Copy your config values below
- * 6. In Firebase Console → Authentication → Sign-in method → enable "Anonymous"
- *    (we use anonymous auth + a user-chosen passphrase as the document key,
- *     so no email/password account is needed)
- * ─────────────────────────────────────────────────────────────────────────────
  */
 
 const FirebaseConfig = {
-  // ── REPLACE THESE WITH YOUR FIREBASE PROJECT VALUES ──────────────────────
-  apiKey:            'YOUR_API_KEY',
-  projectId:         'YOUR_PROJECT_ID',
-  // ─────────────────────────────────────────────────────────────────────────
+  apiKey:    'AIzaSyB38aVbF-2p7jxiXEiR2eQkv1b2FIbyEj0',
+  projectId: 'mangatracker-15917',
 };
 
 const Sync = (() => {
-  const BASE = `https://firestore.googleapis.com/v1/projects/${FirebaseConfig.projectId}/databases/(default)/documents`;
+  const BASE      = `https://firestore.googleapis.com/v1/projects/${FirebaseConfig.projectId}/databases/(default)/documents`;
   const AUTH_BASE = `https://identitytoolkit.googleapis.com/v1`;
 
-  let _idToken = null;
-  let _uid = null;
+  let _idToken  = null;
+  let _uid      = null;
   let _username = null;
+
+  // ── Auto-push debounce ────────────────────────────────────────────────────
+  // Waits 1.5 seconds after the last change before pushing, so rapid edits
+  // don't hammer Firestore with a push on every single keystroke.
+  let _autoPushTimer = null;
+  function scheduleAutoPush() {
+    clearTimeout(_autoPushTimer);
+    _autoPushTimer = setTimeout(async () => {
+      try {
+        const stored = await new Promise(resolve =>
+          chrome.storage.local.get(['mt_entries', 'mt_settings', 'mt_sync_dockey'], resolve)
+        );
+        if (!stored.mt_sync_dockey) return; // not signed in, skip silently
+        const entries  = stored.mt_entries  || [];
+        const settings = stored.mt_settings || {};
+        await push(entries, settings);
+        console.log('[MangaTracker] Auto-pushed to cloud ✓');
+      } catch (e) {
+        console.warn('[MangaTracker] Auto-push failed:', e.message);
+        // Fail silently — user can always push manually from Settings
+      }
+    }, 1500);
+  }
 
   function isConfigured() {
     return FirebaseConfig.apiKey !== 'YOUR_API_KEY' &&
@@ -45,26 +55,11 @@ const Sync = (() => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error?.message || 'Auth failed');
     _idToken = data.idToken;
-    _uid = data.localId;
-    return data;
-  }
-
-  // ── Refresh token ─────────────────────────────────────────────────────────
-  async function refreshToken(refreshToken) {
-    const r = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FirebaseConfig.apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken })
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error?.message || 'Token refresh failed');
-    _idToken = data.id_token;
+    _uid     = data.localId;
     return data;
   }
 
   // ── Hash a passphrase into a consistent document key ─────────────────────
-  // We don't store the passphrase. The key is: sha256(username + ':' + phrase)
-  // truncated to 32 hex chars. Simple, no server-side auth needed.
   async function makeDocKey(username, phrasekey) {
     const raw = `${username.toLowerCase().trim()}:${phrasekey.trim()}`;
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
@@ -105,14 +100,14 @@ const Sync = (() => {
   }
 
   // ── Public API ────────────────────────────────────────────────────────────
+
   async function login(username, phrasekey) {
-    if (!isConfigured()) throw new Error('Firebase not configured. See src/firebase.js for setup instructions.');
+    if (!isConfigured()) throw new Error('Firebase not configured. See src/firebase.js.');
     await signInAnonymously();
-    const docKey = await makeDocKey(username, phrasekey);
-    _username = username.toLowerCase().trim();
-    // Save credentials locally for next session
+    const docKey  = await makeDocKey(username, phrasekey);
+    _username     = username.toLowerCase().trim();
     await new Promise(resolve => chrome.storage.local.set({
-      mt_sync_dockey: docKey,
+      mt_sync_dockey:   docKey,
       mt_sync_username: _username,
     }, resolve));
     return { username: _username, docKey };
@@ -125,7 +120,7 @@ const Sync = (() => {
     );
     if (!data.mt_sync_dockey) return false;
     try {
-      await signInAnonymously(); // anonymous auth is stateless, re-sign each session
+      await signInAnonymously();
       _username = data.mt_sync_username;
       return { username: _username, docKey: data.mt_sync_dockey };
     } catch {
@@ -135,6 +130,7 @@ const Sync = (() => {
 
   async function logout() {
     _idToken = null; _uid = null; _username = null;
+    clearTimeout(_autoPushTimer);
     await new Promise(resolve =>
       chrome.storage.local.remove(['mt_sync_dockey','mt_sync_username'], resolve)
     );
@@ -145,6 +141,8 @@ const Sync = (() => {
       chrome.storage.local.get(['mt_sync_dockey'], resolve)
     );
     if (!data.mt_sync_dockey) throw new Error('Not signed in');
+    // Re-authenticate if token has expired (anonymous tokens last ~1 hour)
+    if (!_idToken) await signInAnonymously();
     await fsSet(`mt_users/${data.mt_sync_dockey}`, {
       entries,
       settings,
@@ -158,12 +156,13 @@ const Sync = (() => {
       chrome.storage.local.get(['mt_sync_dockey'], resolve)
     );
     if (!data.mt_sync_dockey) throw new Error('Not signed in');
+    if (!_idToken) await signInAnonymously();
     const remote = await fsGet(`mt_users/${data.mt_sync_dockey}`);
     return remote; // { entries, settings, pushedAt }
   }
 
-  function getUsername() { return _username; }
-  function configured() { return isConfigured(); }
+  function getUsername()    { return _username; }
+  function configured()     { return isConfigured(); }
 
-  return { login, logout, restoreSession, push, pull, getUsername, configured };
+  return { login, logout, restoreSession, push, pull, getUsername, configured, scheduleAutoPush };
 })();
