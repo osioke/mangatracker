@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MangaTracker</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+:root{
+  --bg:#0d0f12;
+  --bg2:#13161b;
+  --bg3:#1a1e25;
+  --bg4:#20252e;
+  --line:#ffffff12;
+  --line2:#ffffff20;
+  --line3:#ffffff30;
+  --acc:#7c6af7;
+  --acc2:#9d8fff;
+  --acc-dim:#7c6af720;
+  --txt:#e8eaf0;
+  --txt2:#8a8fa8;
+  --txt3:#555a70;
+  --green:#3ecf8e;
+  --amber:#f0a04b;
+  --red:#e06b6b;
+  --font:'JetBrains Mono',ui-monospace,monospace;
+  --radius:6px;
+}
+
+html,body{
+  width:360px;
+  min-height:520px;
+  background:var(--bg);
+  color:var(--txt);
+  font-family:var(--font);
+  font-size:12px;
+  line-height:1.5;
+  overflow:hidden;
+}
+
+body.fullpage{
+  width:800px;
+  min-height:600px;
+}
+
+/* ── Layout ─────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100vh}
+
+.header{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 14px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg2);
+  flex-shrink:0;
+}
+.logo{
+  font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--txt3);flex:1;
+}
+.logo span{color:var(--acc2)}
+.hbtn{
+  background:none;border:1px solid var(--line2);border-radius:var(--radius);
+  padding:4px 9px;color:var(--txt3);font-family:var(--font);font-size:10px;
+  letter-spacing:.08em;cursor:pointer;display:flex;align-items:center;gap:5px;
+  transition:all .12s;
+}
+.hbtn:hover{color:var(--txt2);border-color:var(--line3)}
+
+.body{display:flex;flex:1;overflow:hidden}
+
+.sidebar{
+  width:44px;background:var(--bg2);
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;
+  padding:10px 0;gap:4px;flex-shrink:0;
+}
+.nbtn{
+  width:32px;height:32px;border-radius:var(--radius);border:none;
+  background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  color:var(--txt3);font-size:16px;transition:all .12s;position:relative;
+}
+.nbtn:hover{background:var(--bg3);color:var(--txt2)}
+.nbtn.active{background:var(--bg3);color:var(--acc2)}
+.nbtn.active::before{
+  content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:2px;height:16px;background:var(--acc);border-radius:0 2px 2px 0;
+}
+.nsep{width:18px;height:1px;background:var(--line2);margin:4px 0}
+
+.main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+
+.subtabbar{
+  display:flex;border-bottom:1px solid var(--line);
+  background:var(--bg2);flex-shrink:0;
+}
+.stab{
+  padding:7px 14px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--txt3);cursor:pointer;border:none;background:none;font-family:var(--font);
+  border-bottom:2px solid transparent;transition:all .12s;margin-bottom:-1px;
+}
+.stab:hover{color:var(--txt2)}
+.stab.active{color:var(--acc2);border-bottom-color:var(--acc)}
+
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--line2) transparent}
+
+/* ── Panels ─────────────────────────────── */
+.panel{display:none;padding:14px}
+.panel.active{display:block}
+
+/* ── Day strip ───────────────────────────── */
+.daystrip{
+  display:flex;gap:5px;margin-bottom:14px;overflow-x:auto;
+  scrollbar-width:none;padding-bottom:2px;
+}
+.daystrip::-webkit-scrollbar{display:none}
+.daypill{
+  padding:4px 10px;border-radius:var(--radius);font-size:10px;
+  letter-spacing:.08em;cursor:pointer;border:1px solid var(--line2);
+  color:var(--txt3);background:none;font-family:var(--font);
+  white-space:nowrap;transition:all .12s;flex-shrink:0;
+}
+.daypill:hover{color:var(--txt2)}
+.daypill.active{background:var(--acc);border-color:var(--acc);color:#fff}
+.daypill.hasrel{border-color:var(--acc-dim);color:var(--txt2)}
+.daypill.active.hasrel{color:#fff}
+
+/* ── Section labels ──────────────────────── */
+.slabel{
+  font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--txt3);margin-bottom:7px;padding-bottom:5px;
+  border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;
+}
+.sgap{margin-top:16px}
+
+/* ── Entry rows ──────────────────────────── */
+.entry{
+  display:flex;align-items:center;gap:10px;padding:9px 0;
+  border-bottom:1px solid var(--line);cursor:pointer;transition:all .1s;
+}
+.entry:last-child{border-bottom:none}
+.entry:hover .etitle{color:var(--acc2)}
+
+.art{
+  width:32px;height:44px;border-radius:4px;
+  background:var(--bg3);border:1px solid var(--line2);
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  font-size:16px;overflow:hidden;position:relative;
+}
+.art img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+
+.ebody{flex:1;min-width:0}
+.etitle{
+  font-size:12px;color:var(--txt);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;transition:color .1s;letter-spacing:.02em;
+}
+.emeta{font-size:10px;color:var(--txt3);margin-top:2px;letter-spacing:.02em}
+
+.eright{text-align:right;flex-shrink:0}
+.echnum{font-size:12px;color:var(--txt2);letter-spacing:.04em}
+
+.tag{
+  display:inline-block;font-size:9px;letter-spacing:.08em;
+  padding:2px 5px;border-radius:3px;margin-top:3px;
+}
+.tag-new{background:#7c6af718;color:var(--acc2);border:1px solid #7c6af730}
+.tag-cook{background:#f0a04b14;color:var(--amber);border:1px solid #f0a04b28}
+.tag-soon{background:#ffffff08;color:var(--txt3);border:1px solid var(--line2)}
+
+.sdot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.dot-on{background:var(--green)}
+.dot-cook{background:var(--amber)}
+.dot-drop{background:var(--red)}
+.dot-done{background:var(--txt3)}
+
+/* ── Library controls ────────────────────── */
+.libctrl{display:flex;gap:6px;margin-bottom:12px;align-items:center}
+.searchbox{
+  flex:1;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:6px 8px 6px 28px;color:var(--txt);font-family:var(--font);font-size:11px;outline:none;
+  transition:border-color .12s;
+}
+.searchbox:focus{border-color:var(--acc)}
+.swrap{position:relative;flex:1}
+.swrap .si{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:var(--txt3);font-size:13px;pointer-events:none}
+.fsel{
+  background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:5px 8px;color:var(--txt2);font-family:var(--font);font-size:10px;
+  outline:none;cursor:pointer;letter-spacing:.04em;
+}
+
+.grouphead{
+  font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--txt3);padding:10px 0 5px;border-bottom:1px solid var(--line);
+  display:flex;justify-content:space-between;align-items:center;
+}
+.gcnt{color:var(--txt3);font-size:9px}
+
+/* ── Add form ────────────────────────────── */
+.detect{
+  background:var(--bg2);border:1px solid var(--line2);border-radius:8px;
+  padding:11px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start;
+}
+.dart{
+  width:40px;height:54px;border-radius:4px;background:var(--bg3);
+  border:1px solid var(--line);flex-shrink:0;display:flex;
+  align-items:center;justify-content:center;font-size:20px;overflow:hidden;position:relative;
+}
+.dart img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.dinfo{flex:1;min-width:0}
+.durl{font-size:9px;color:var(--txt3);letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.dname{font-size:13px;color:var(--txt);letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsite{font-size:9px;color:var(--txt3);margin-top:3px;letter-spacing:.04em}
+
+.field{margin-bottom:12px}
+.flabel{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt3);margin-bottom:5px;display:block}
+.finput{
+  width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:7px 9px;color:var(--txt);font-family:var(--font);font-size:11px;
+  outline:none;transition:border-color .12s;
+}
+.finput:focus{border-color:var(--acc)}
+.fselect{
+  width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:7px 9px;color:var(--txt);font-family:var(--font);font-size:11px;
+  outline:none;cursor:pointer;appearance:none;
+}
+.ftextarea{
+  width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:7px 9px;color:var(--txt);font-family:var(--font);font-size:11px;
+  outline:none;transition:border-color .12s;resize:none;
+}
+.ftextarea:focus{border-color:var(--acc)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+.pills{display:flex;flex-wrap:wrap;gap:4px}
+.pill{
+  font-size:10px;letter-spacing:.06em;padding:3px 8px;border-radius:4px;
+  border:1px solid var(--line2);cursor:pointer;background:none;
+  color:var(--txt3);font-family:var(--font);transition:all .12s;
+}
+.pill:hover{color:var(--txt2)}
+.pill.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.pill.small{font-size:9px;padding:2px 7px}
+
+.freqrow{display:flex;gap:4px;margin-bottom:7px}
+.fchip{
+  font-size:10px;padding:3px 10px;border-radius:4px;border:1px solid var(--line2);
+  cursor:pointer;background:none;color:var(--txt3);font-family:var(--font);transition:all .12s;
+}
+.fchip.on{border-color:var(--acc2);color:var(--acc2);background:var(--bg3)}
+
+.dayrow{display:flex;gap:4px;flex-wrap:wrap}
+.dchip{
+  font-size:10px;padding:3px 8px;border-radius:4px;border:1px solid var(--line2);
+  cursor:pointer;background:none;color:var(--txt3);font-family:var(--font);transition:all .12s;
+}
+.dchip.on{border-color:var(--acc2);color:var(--acc2);background:var(--bg3)}
+
+.savebtn{
+  width:100%;padding:9px;border-radius:var(--radius);border:none;cursor:pointer;
+  font-family:var(--font);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  background:var(--acc);color:#fff;transition:opacity .12s;margin-top:4px;
+}
+.savebtn:hover{opacity:.85}
+.savebtn:active{opacity:.7}
+.savebtn:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── Sites ───────────────────────────────── */
+.sitegrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.sitecard{
+  background:var(--bg2);border:1px solid var(--line2);border-radius:8px;
+  padding:11px;cursor:pointer;transition:border-color .12s;
+}
+.sitecard:hover{border-color:var(--line3)}
+.siteicon{
+  width:26px;height:26px;border-radius:5px;display:flex;align-items:center;
+  justify-content:center;font-size:10px;font-weight:500;letter-spacing:.04em;margin-bottom:7px;
+}
+.sitename{font-size:11px;color:var(--txt);letter-spacing:.02em;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sitemeta{font-size:9px;color:var(--txt3);letter-spacing:.04em}
+.sitecnt{font-size:10px;color:var(--acc2);margin-top:5px}
+.addsite{
+  border-style:dashed;display:flex;align-items:center;justify-content:center;
+  gap:5px;color:var(--txt3);font-size:10px;letter-spacing:.06em;
+}
+
+/* ── Settings ────────────────────────────── */
+.srow{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--line);
+}
+.srow:last-child{border-bottom:none}
+.sleft{}
+.stitle{font-size:11px;color:var(--txt);letter-spacing:.02em}
+.sdesc{font-size:9px;color:var(--txt3);margin-top:2px;letter-spacing:.02em}
+.sinput{
+  background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:5px 8px;color:var(--txt);font-family:var(--font);font-size:11px;
+  outline:none;width:60px;text-align:center;
+}
+.toggle{position:relative;width:30px;height:17px;cursor:pointer}
+.toggle input{opacity:0;width:0;height:0;position:absolute}
+.tslider{
+  position:absolute;inset:0;background:var(--bg3);border:1px solid var(--line2);
+  border-radius:99px;transition:all .2s;
+}
+.tslider::before{
+  content:'';position:absolute;width:11px;height:11px;border-radius:50%;
+  background:var(--txt3);top:2px;left:2px;transition:all .2s;
+}
+.toggle input:checked + .tslider{background:var(--acc);border-color:var(--acc)}
+.toggle input:checked + .tslider::before{transform:translateX(13px);background:#fff}
+
+/* ── Detail modal ─────────────────────────── */
+.modal-bg{
+  display:none;position:absolute;inset:0;background:#00000088;
+  z-index:100;align-items:flex-start;justify-content:center;padding-top:10px;
+}
+.modal-bg.open{display:flex}
+.modal{
+  background:var(--bg);border:1px solid var(--line2);border-radius:10px;
+  width:calc(100% - 20px);max-height:90vh;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--line2) transparent;
+}
+.modal-header{
+  display:flex;align-items:flex-start;gap:11px;padding:14px;
+  border-bottom:1px solid var(--line);
+}
+.modal-art{
+  width:50px;height:68px;border-radius:5px;background:var(--bg3);
+  border:1px solid var(--line2);flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;font-size:24px;overflow:hidden;position:relative;
+}
+.modal-art img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.modal-info{flex:1;min-width:0}
+.modal-title{font-size:14px;color:var(--txt);letter-spacing:.02em;word-break:break-word}
+.modal-site{font-size:10px;color:var(--txt3);margin-top:3px;letter-spacing:.04em}
+.modal-close{
+  background:none;border:1px solid var(--line2);border-radius:var(--radius);
+  padding:4px 7px;color:var(--txt3);cursor:pointer;font-size:16px;flex-shrink:0;
+}
+.modal-close:hover{color:var(--txt2)}
+.modal-body{padding:14px}
+.mstat{
+  display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px;
+}
+.mstat-card{background:var(--bg2);border-radius:var(--radius);padding:9px;border:1px solid var(--line)}
+.mstat-label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3);margin-bottom:3px}
+.mstat-val{font-size:14px;color:var(--txt);letter-spacing:.04em}
+.mactions{display:flex;gap:6px;margin-bottom:14px}
+.mact{
+  flex:1;padding:7px;border-radius:var(--radius);border:1px solid var(--line2);
+  background:none;color:var(--txt2);font-family:var(--font);font-size:10px;
+  letter-spacing:.06em;cursor:pointer;text-transform:uppercase;transition:all .12s;
+}
+.mact:hover{border-color:var(--line3);color:var(--txt)}
+.mact.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.mact.primary:hover{opacity:.85}
+.mact.danger{color:var(--red);border-color:var(--red)20}
+.mact.danger:hover{background:var(--red)14}
+.mnotes{font-size:10px;color:var(--txt3);letter-spacing:.02em;line-height:1.6;padding-top:10px;border-top:1px solid var(--line)}
+.medit-ch{
+  display:flex;align-items:center;gap:8px;margin-bottom:14px;
+  padding:9px;background:var(--bg2);border-radius:var(--radius);border:1px solid var(--line);
+}
+.ch-control{
+  background:none;border:1px solid var(--line2);border-radius:4px;
+  width:24px;height:24px;color:var(--txt2);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-family:var(--font);
+  transition:all .1s;
+}
+.ch-control:hover{border-color:var(--line3);color:var(--txt)}
+.ch-display{flex:1;text-align:center;font-size:15px;color:var(--txt);letter-spacing:.04em}
+.ch-label{font-size:9px;color:var(--txt3);letter-spacing:.08em;text-transform:uppercase}
+
+/* ── Sidebar: push add btn to bottom ────── */
+.sidebar{justify-content:flex-start}
+.sidebar .nsep-push{flex:1}
+
+/* ── Custom tag input ─────────────────────── */
+.custom-tag-row{
+  display:flex;align-items:center;gap:5px;margin-top:6px;
+}
+.custom-tag-input{
+  flex:1;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:4px 8px;color:var(--txt);font-family:var(--font);font-size:10px;
+  outline:none;transition:border-color .12s;
+}
+.custom-tag-input:focus{border-color:var(--acc)}
+.custom-tag-add{
+  background:none;border:1px solid var(--line2);border-radius:var(--radius);
+  width:22px;height:22px;color:var(--txt3);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  transition:all .12s;font-family:var(--font);
+}
+.custom-tag-add:hover{border-color:var(--acc2);color:var(--acc2)}
+
+/* ── Image upload ─────────────────────────── */
+.img-upload-wrap{
+  display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;
+}
+.img-preview{
+  width:50px;height:68px;border-radius:5px;background:var(--bg3);
+  border:1px solid var(--line2);flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;font-size:22px;overflow:hidden;position:relative;cursor:pointer;
+  transition:border-color .12s;
+}
+.img-preview:hover{border-color:var(--line3)}
+.img-preview img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.img-preview .img-overlay{
+  position:absolute;inset:0;background:#00000066;display:flex;align-items:center;
+  justify-content:center;opacity:0;transition:opacity .12s;font-size:16px;
+}
+.img-preview:hover .img-overlay{opacity:1}
+.img-upload-info{flex:1;min-width:0}
+.img-upload-hint{font-size:9px;color:var(--txt3);letter-spacing:.04em;line-height:1.6}
+.img-src-row{display:flex;gap:4px;margin-top:5px}
+.img-src-btn{
+  font-size:9px;padding:3px 7px;border-radius:4px;border:1px solid var(--line2);
+  cursor:pointer;background:none;color:var(--txt3);font-family:var(--font);transition:all .12s;
+}
+.img-src-btn.on{border-color:var(--acc2);color:var(--acc2);background:var(--bg3)}
+
+/* ── Sync / auth ─────────────────────────── */
+.sync-status{
+  display:flex;align-items:center;gap:6px;padding:8px 10px;
+  background:var(--bg2);border:1px solid var(--line2);border-radius:var(--radius);
+  margin-bottom:10px;font-size:10px;color:var(--txt3);letter-spacing:.04em;
+}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--txt3);flex-shrink:0}
+.sync-dot.ok{background:var(--green)}
+.sync-dot.busy{background:var(--amber);animation:pulse 1s infinite}
+.sync-dot.err{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.sync-label{flex:1}
+.sync-btn{
+  background:none;border:1px solid var(--line2);border-radius:4px;
+  padding:3px 8px;color:var(--txt3);font-family:var(--font);font-size:9px;
+  letter-spacing:.06em;cursor:pointer;transition:all .12s;
+}
+.sync-btn:hover{color:var(--txt2);border-color:var(--line3)}
+
+/* ── Empty states ────────────────────────── */
+.empty{
+  text-align:center;padding:40px 20px;color:var(--txt3);
+  font-size:10px;letter-spacing:.06em;
+}
+.empty-icon{font-size:32px;margin-bottom:12px}
+.empty-msg{color:var(--txt3);margin-bottom:8px}
+
+/* ── Toast ───────────────────────────────── */
+.toast{
+  position:absolute;bottom:12px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--bg3);border:1px solid var(--line2);border-radius:var(--radius);
+  padding:7px 14px;font-size:10px;letter-spacing:.08em;color:var(--txt2);
+  opacity:0;transition:all .2s;pointer-events:none;white-space:nowrap;z-index:200;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── Fullpage tweaks ─────────────────────── */
+body.fullpage html,
+body.fullpage{width:800px}
+body.fullpage .panel{padding:18px 20px}
+body.fullpage .modal-bg{position:fixed}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="header">
+    <span class="logo">Manga<span>Tracker</span></span>
+    <button class="hbtn" id="fullbtn" title="Open full page">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 1h3v3M4 10H1V7M10 4l-3.5 3.5M1 7l3.5-3.5"/></svg>
+      Full page
+    </button>
+    <button class="hbtn" id="settingsbtn" title="Settings">
+      <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5.5" cy="5.5" r="1.5"/><path d="M5.5 1v1M5.5 9v1M1 5.5h1M9 5.5h1M2.3 2.3l.7.7M8 8l.7.7M8 2.3l-.7.7M3 8l-.7.7"/></svg>
+      Settings
+    </button>
+  </div>
+
+  <div class="body">
+    <div class="sidebar">
+      <button class="nbtn active" data-nav="today" title="Schedule">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h2M8 18h2M12 14h4M12 18h2"/></svg>
+      </button>
+      <button class="nbtn" data-nav="library" title="Library">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v13"/><path d="M4 19a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-1"/><path d="M8 11h8M8 7h8M8 15h5"/></svg>
+      </button>
+      <button class="nbtn" data-nav="sites" title="Sites">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a14.5 14.5 0 0 1 3 9 14.5 14.5 0 0 1-3 9 14.5 14.5 0 0 1-3-9 14.5 14.5 0 0 1 3-9z"/></svg>
+      </button>
+      <div class="nsep-push"></div>
+      <div class="nsep"></div>
+      <button class="nbtn" data-nav="add" title="Add entry">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+      </button>
+    </div>
+
+    <div class="main">
+      <!-- Subtab bars -->
+      <div class="subtabbar" id="stbar-today">
+        <button class="stab active" data-stab="today-today">Today</button>
+        <button class="stab" data-stab="today-week">Week</button>
+      </div>
+      <div class="subtabbar" id="stbar-library" style="display:none">
+        <button class="stab active" data-stab="library-all">All titles</button>
+        <button class="stab" data-stab="library-bysite">By site</button>
+      </div>
+
+      <div class="scroll">
+        <!-- TODAY panel -->
+        <div class="panel active" id="pane-today-today">
+          <div class="daystrip" id="daystrip"></div>
+          <div id="today-content"></div>
+        </div>
+
+        <!-- WEEK panel -->
+        <div class="panel" id="pane-today-week">
+          <div id="week-content"></div>
+        </div>
+
+        <!-- LIBRARY all -->
+        <div class="panel" id="pane-library-all">
+          <div class="libctrl">
+            <div class="swrap">
+              <svg class="si" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+              <input class="searchbox" id="lib-search" placeholder="Search…" type="search">
+            </div>
+            <select class="fsel" id="lib-type-filter">
+              <option value="">All types</option>
+              <option value="manhwa">Manhwa</option>
+              <option value="manga">Manga</option>
+              <option value="manhua">Manhua</option>
+              <option value="anime">Anime</option>
+            </select>
+            <select class="fsel" id="lib-status-filter">
+              <option value="">All</option>
+              <option value="ongoing">Following</option>
+              <option value="cooking">Cooking</option>
+              <option value="completed">Completed</option>
+              <option value="dropped">Dropped</option>
+            </select>
+          </div>
+          <div id="lib-all-content"></div>
+        </div>
+
+        <!-- LIBRARY by site -->
+        <div class="panel" id="pane-library-bysite">
+          <div id="lib-site-content"></div>
+        </div>
+
+        <!-- ADD panel -->
+        <div class="panel" id="pane-add">
+          <div class="detect" id="detect-card">
+            <div class="dart" id="detect-art">📖</div>
+            <div class="dinfo">
+              <div class="durl" id="detect-url">Detecting page…</div>
+              <div class="dname" id="detect-name">—</div>
+              <div class="dsite" id="detect-site">—</div>
+            </div>
+          </div>
+
+          <div class="img-upload-wrap">
+            <div class="img-preview" id="img-preview" title="Click to upload cover art">
+              <span id="img-preview-emoji">📖</span>
+              <div class="img-overlay">📷</div>
+            </div>
+            <div class="img-upload-info">
+              <div class="img-upload-hint">Cover art — auto-detected from page.<br>Click the thumbnail to upload your own.</div>
+              <div class="img-src-row">
+                <button class="img-src-btn on" id="img-src-auto">Auto</button>
+                <button class="img-src-btn" id="img-src-upload">Upload</button>
+                <button class="img-src-btn" id="img-src-clear">Clear</button>
+              </div>
+            </div>
+            <input type="file" id="img-file-input" accept="image/*" style="display:none">
+          </div>
+
+          <div class="field">
+            <label class="flabel">Title</label>
+            <input class="finput" id="f-title" type="text" placeholder="Title">
+          </div>
+          <div class="row2">
+            <div class="field">
+              <label class="flabel">Type</label>
+              <select class="fselect" id="f-type">
+                <option value="manhwa">Manhwa</option>
+                <option value="manga">Manga</option>
+                <option value="manhua">Manhua</option>
+                <option value="anime">Anime</option>
+                <option value="webtoon">Webtoon</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="flabel">Chapter / episode</label>
+              <input class="finput" id="f-chapter" type="number" value="0" min="0">
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="flabel">Genre</label>
+            <div class="pills" id="trope-pills">
+              <button class="pill small" data-group="tropes">Isekai</button>
+              <button class="pill small" data-group="tropes">Regression</button>
+              <button class="pill small" data-group="tropes">Murim / Wuxia</button>
+              <button class="pill small" data-group="tropes">System</button>
+              <button class="pill small" data-group="tropes">Romance</button>
+              <button class="pill small" data-group="tropes">Harem</button>
+              <button class="pill small" data-group="tropes">Reincarnation</button>
+              <button class="pill small" data-group="tropes">Cultivation</button>
+              <button class="pill small" data-group="tropes">Slice of life</button>
+              <button class="pill small" data-group="tropes">Fantasy</button>
+              <button class="pill small" data-group="tropes">Historical</button>
+              <button class="pill small" data-group="tropes">Shonen</button>
+              <button class="pill small" data-group="tropes">Magic</button>
+              <button class="pill small" data-group="tropes">Action</button>
+              <button class="pill small" data-group="tropes">Adventure</button>
+              <button class="pill small" data-group="tropes">Modern</button>
+              <button class="pill small" data-group="tropes">Medieval</button>
+            </div>
+            <div class="custom-tag-row" id="trope-custom-row">
+              <input class="custom-tag-input" id="trope-custom-input" type="text" placeholder="Add genre…" maxlength="32">
+              <button class="custom-tag-add" id="trope-custom-btn">+</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="flabel">Vibe</label>
+            <div class="pills" id="vibe-pills">
+              <button class="pill small" data-group="vibes">Hype</button>
+              <button class="pill small" data-group="vibes">Comfort read</button>
+              <button class="pill small" data-group="vibes">Binge-worthy</button>
+              <button class="pill small" data-group="vibes">Slow burn</button>
+              <button class="pill small" data-group="vibes">Emotional</button>
+              <button class="pill small" data-group="vibes">Tense</button>
+              <button class="pill small" data-group="vibes">Guilty pleasure</button>
+            </div>
+            <div class="custom-tag-row" id="vibe-custom-row">
+              <input class="custom-tag-input" id="vibe-custom-input" type="text" placeholder="Add vibe…" maxlength="32">
+              <button class="custom-tag-add" id="vibe-custom-btn">+</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="flabel">Release — times per week</label>
+            <div class="freqrow" id="freq-chips">
+              <button class="fchip on" data-freq="1">1×</button>
+              <button class="fchip" data-freq="2">2×</button>
+              <button class="fchip" data-freq="3">3×</button>
+              <button class="fchip" data-freq="0">Irregular</button>
+            </div>
+            <div class="dayrow" id="day-chips">
+              <button class="dchip" data-day="0">Sun</button>
+              <button class="dchip" data-day="1">Mon</button>
+              <button class="dchip" data-day="2">Tue</button>
+              <button class="dchip" data-day="3">Wed</button>
+              <button class="dchip" data-day="4">Thu</button>
+              <button class="dchip" data-day="5">Fri</button>
+              <button class="dchip" data-day="6">Sat</button>
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="field">
+              <label class="flabel">Mode</label>
+              <div class="pills" id="mode-pills">
+                <button class="pill on" data-group="mode">Following</button>
+                <button class="pill" data-group="mode">Cooking</button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="flabel">Status</label>
+              <div class="pills" id="status-pills">
+                <button class="pill on" data-group="status">Ongoing</button>
+                <button class="pill" data-group="status">Completed</button>
+                <button class="pill" data-group="status">Hiatus</button>
+                <button class="pill" data-group="status">Dropped</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="flabel">Notes</label>
+            <textarea class="ftextarea" id="f-notes" rows="2" placeholder="e.g. better translation on MangaPlus after ch.80"></textarea>
+          </div>
+
+          <button class="savebtn" id="save-btn">Save to library</button>
+        </div>
+
+        <!-- SITES panel -->
+        <div class="panel" id="pane-sites">
+          <div class="sitegrid" id="sites-grid"></div>
+        </div>
+
+        <!-- SETTINGS panel -->
+        <div class="panel" id="pane-settings">
+          <div class="slabel" style="margin-bottom:12px">Preferences</div>
+          <div class="srow">
+            <div class="sleft">
+              <div class="stitle">Cook threshold</div>
+              <div class="sdesc">Min chapters waiting before Today nudge</div>
+            </div>
+            <input class="sinput" id="s-cook" type="number" min="1" max="99" value="10">
+          </div>
+          <div class="srow">
+            <div class="sleft">
+              <div class="stitle">Show up-to-date titles</div>
+              <div class="sdesc">Show completed-for-today in schedule</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="s-uptodate" checked>
+              <span class="tslider"></span>
+            </label>
+          </div>
+          <div class="srow">
+            <div class="sleft">
+              <div class="stitle">Default mode</div>
+              <div class="sdesc">When saving a new entry</div>
+            </div>
+            <select class="fsel" id="s-defmode">
+              <option value="following">Following</option>
+              <option value="cooking">Cooking</option>
+            </select>
+          </div>
+          <div class="slabel" style="margin-top:16px;margin-bottom:12px">Sync</div>
+          <div id="sync-status-bar" class="sync-status">
+            <span class="sync-dot" id="sync-dot"></span>
+            <span class="sync-label" id="sync-label">Not signed in</span>
+            <button class="sync-btn" id="sync-action-btn">Sign in</button>
+          </div>
+          <div id="sync-form" style="display:none">
+            <div class="field">
+              <label class="flabel">Username</label>
+              <input class="finput" id="sync-username" type="text" placeholder="your name" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="flabel">Phrase-key</label>
+              <input class="finput" id="sync-phrasekey" type="password" placeholder="easy to remember phrase" autocomplete="off">
+            </div>
+            <div style="display:flex;gap:6px">
+              <button class="savebtn" id="sync-signin-btn" style="margin-top:0">Sign in / Register</button>
+              <button class="mact" id="sync-cancel-btn" style="flex:0;white-space:nowrap;padding:7px 10px">Cancel</button>
+            </div>
+          </div>
+          <div id="sync-controls" style="display:none;margin-top:8px">
+            <div style="display:flex;gap:6px">
+              <button class="mact primary" id="sync-push-btn">Push to cloud</button>
+              <button class="mact" id="sync-pull-btn">Pull from cloud</button>
+            </div>
+          </div>
+          <div class="slabel" style="margin-top:16px;margin-bottom:12px">Data</div>
+          <div class="srow">
+            <div class="sleft">
+              <div class="stitle">Export library</div>
+              <div class="sdesc">Download as JSON backup</div>
+            </div>
+            <button class="hbtn" id="export-btn">Export</button>
+          </div>
+          <div class="srow">
+            <div class="sleft">
+              <div class="stitle">Import library</div>
+              <div class="sdesc">Restore from JSON backup</div>
+            </div>
+            <button class="hbtn" id="import-btn">Import</button>
+            <input type="file" id="import-file" accept=".json" style="display:none">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal-bg" id="detail-modal">
+  <div class="modal" id="detail-modal-inner"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="src/storage.js"></script>
+<script src="src/schedule.js"></script>
+<script src="src/firebase.js"></script>
+<script src="src/popup.js"></script>
+</body>
+</html>
