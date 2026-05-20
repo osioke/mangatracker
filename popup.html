@@ -88,8 +88,6 @@ body.fullpage{
   content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);
   width:2px;height:16px;background:var(--acc);border-radius:0 2px 2px 0;
 }
-.nsep{width:18px;height:1px;background:var(--line2);margin:4px 0}
-
 .main{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
 
 .subtabbar{
@@ -376,10 +374,6 @@ body.fullpage{
 .ch-display{flex:1;text-align:center;font-size:15px;color:var(--txt);letter-spacing:.04em}
 .ch-label{font-size:9px;color:var(--txt3);letter-spacing:.08em;text-transform:uppercase}
 
-/* ── Sidebar: push add btn to bottom ────── */
-.sidebar{justify-content:flex-start}
-.sidebar .nsep-push{flex:1}
-
 /* ── Custom tag input ─────────────────────── */
 .custom-tag-row{
   display:flex;align-items:center;gap:5px;margin-top:6px;
@@ -490,8 +484,6 @@ body.fullpage .modal-bg{position:fixed}
       <button class="nbtn" data-nav="library" title="Library">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v13"/><path d="M4 19a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-1"/><path d="M8 11h8M8 7h8M8 15h5"/></svg>
       </button>
-      <div class="nsep-push"></div>
-      <div class="nsep"></div>
       <button class="nbtn" data-nav="sites" title="Sites">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a14.5 14.5 0 0 1 3 9 14.5 14.5 0 0 1-3 9 14.5 14.5 0 0 1-3-9 14.5 14.5 0 0 1 3-9z"/></svg>
       </button>
@@ -564,20 +556,6 @@ body.fullpage .modal-bg{position:fixed}
             </div>
           </div>
 
-          <!-- Link this URL as an additional source on an existing entry -->
-          <div class="field" id="link-source-row" style="display:none">
-            <label class="flabel">Add as source for existing entry instead?</label>
-            <div style="display:flex;gap:6px;align-items:center">
-              <select class="fselect" id="link-source-select" style="flex:1">
-                <option value="">— pick an entry —</option>
-              </select>
-              <button class="hbtn" id="link-source-btn" style="white-space:nowrap">Add source</button>
-            </div>
-            <div style="font-size:9px;color:var(--txt3);margin-top:4px;letter-spacing:.04em">
-              This saves the current URL as an alternate reading source on the selected entry, rather than creating a new one.
-            </div>
-          </div>
-
           <div class="img-upload-wrap">
             <div class="img-preview" id="img-preview" title="Click to upload cover art">
               <span id="img-preview-emoji">📖</span>
@@ -588,7 +566,6 @@ body.fullpage .modal-bg{position:fixed}
               <div class="img-src-row">
                 <button class="img-src-btn on" id="img-src-auto">Auto</button>
                 <button class="img-src-btn" id="img-src-upload">Upload</button>
-                <button class="img-src-btn" id="img-src-pick">Pick</button>
                 <button class="img-src-btn" id="img-src-clear">Clear</button>
               </div>
             </div>

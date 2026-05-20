@@ -53,7 +53,17 @@ const Sync = (() => {
       body: JSON.stringify({ returnSecureToken: true })
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error?.message || 'Auth failed');
+    if (!r.ok) {
+      const code = data.error?.message || 'AUTH_FAILED';
+      // Translate the most common Firebase error codes into plain English
+      if (code === 'CONFIGURATION_NOT_FOUND')
+        throw new Error('Firebase: Anonymous sign-in is not enabled. Go to Firebase Console → Authentication → Sign-in method → enable Anonymous.');
+      if (code === 'API_KEY_INVALID' || code.includes('API_KEY'))
+        throw new Error('Firebase: API key is invalid. Check the apiKey value in src/firebase.js.');
+      if (code === 'OPERATION_NOT_ALLOWED')
+        throw new Error('Firebase: Anonymous auth is disabled. Enable it in Firebase Console → Authentication → Sign-in method.');
+      throw new Error(`Firebase auth error: ${code}`);
+    }
     _idToken = data.idToken;
     _uid     = data.localId;
     return data;

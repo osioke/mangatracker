@@ -400,41 +400,6 @@
     }
 
     if (!state.editId) detectPageInfo();
-
-    // ── Link-to-existing-source panel ─────────────────────────────────────────
-    // Shown only when we're on a page that looks like a reading site (has a hostname)
-    // and there are existing entries to link to.
-    const linkRow    = $('link-source-row');
-    const linkSelect = $('link-source-select');
-    const linkBtn    = $('link-source-btn');
-    if (linkRow && linkSelect && linkBtn && state.entries.length && !state.editId) {
-      // Populate the dropdown
-      linkSelect.innerHTML = '<option value="">— pick an entry —</option>' +
-        state.entries.map(e => `<option value="${e.id}">${escHtml(e.title)}</option>`).join('');
-      linkRow.style.display = '';
-      // Wire add-source action
-      if (!linkBtn.dataset.wired) {
-        linkBtn.dataset.wired = '1';
-        linkBtn.addEventListener('click', async () => {
-          const targetId = linkSelect.value;
-          if (!targetId) { showToast('Pick an entry first'); return; }
-          const target = state.entries.find(e => e.id === targetId);
-          if (!target) return;
-          const url      = state.pageInfo?.url || '';
-          const hostname = state.pageInfo?.hostname || '';
-          if (!url) { showToast('No page URL detected'); return; }
-          target.altUrls      = [...(target.altUrls || []), url];
-          target.altHostnames = [...(target.altHostnames || []), hostname];
-          await Storage.saveEntry(target);
-          state.entries = await Storage.getEntries();
-          if (state.syncUser) Sync.scheduleAutoPush();
-          showToast(`Source added to "${target.title}"`);
-          switchNav('library');
-        });
-      }
-    } else if (linkRow) {
-      linkRow.style.display = 'none';
-    }
   }
 
   function detectPageInfo() {
@@ -533,73 +498,87 @@
       reader.onload = e => {
         state.uploadedImageData = e.target.result;
         setPreviewImage(e.target.result);
-        srcUpload.classList.add('on');
-        srcAuto.classList.remove('on');
+        srcUpload?.classList.add('on');
+        srcAuto?.classList.remove('on');
         srcPick?.classList.remove('on');
       };
       reader.readAsDataURL(file);
       fileInput.value = '';
     });
 
-    srcAuto.addEventListener('click', () => {
+    srcAuto?.addEventListener('click', () => {
       state.uploadedImageData = null;
       srcAuto.classList.add('on');
-      srcUpload.classList.remove('on');
+      srcUpload?.classList.remove('on');
       srcPick?.classList.remove('on');
       clearPreviewImage();
       if (state.pageInfo?.image) setPreviewImage(state.pageInfo.image);
     });
 
-    srcUpload.addEventListener('click', () => fileInput.click());
+    srcUpload?.addEventListener('click', () => fileInput.click());
 
-    // ── Pick from page ───────────────────────────────────────────────────────
-    // Closes the popup, activates a crosshair picker on the page, and when the
-    // user clicks an image the src comes back here and is stored as imageData.
-    // We convert it via a canvas so we own a data-URL copy (avoids CORS issues
-    // on the extension's CSP when the image later renders in the popup).
+    // ── Pick from page ─────────────────────────────────────────────────────
+    // The popup window closes when focus moves to the page, so we open a
+    // detached browser window (type:'panel') that stays alive. Content.js
+    // broadcasts IMAGE_PICK_RESULT via runtime.sendMessage, background.js
+    // forwards it, and we listen here.
     srcPick?.addEventListener('click', () => {
-      showToast('Click an image on the page  ·  Esc to cancel', 4000);
       chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-        if (!tabs[0]) return;
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_IMAGE_PICK' }, response => {
-          if (chrome.runtime.lastError || !response) return;
-          if (response.cancelled || !response.src) return;
+        if (!tabs[0]) { showToast('No active tab found'); return; }
 
-          // Fetch the image and convert to base64 so we own a local copy
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          img.onload = () => {
-            try {
-              const canvas = document.createElement('canvas');
-              // Cap at 400px wide to keep storage reasonable
-              const scale = Math.min(1, 400 / img.naturalWidth);
-              canvas.width  = Math.round(img.naturalWidth  * scale);
-              canvas.height = Math.round(img.naturalHeight * scale);
-              canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-              const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-              state.uploadedImageData = dataUrl;
-              setPreviewImage(dataUrl);
-              srcPick?.classList.add('on');
-              srcAuto.classList.remove('on');
-              srcUpload.classList.remove('on');
-              showToast('Cover art picked ✓');
-            } catch {
-              // Canvas CORS tainted — fall back to using the src URL directly
-              state.uploadedImageData = null;
-              setPreviewImage(response.src);
-              showToast('Picked (URL only — CORS restricted)');
-            }
-          };
-          img.onerror = () => showToast('Could not load that image');
-          img.src = response.src;
+        // Tell content script to start picker mode
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_IMAGE_PICK' }, resp => {
+          if (chrome.runtime.lastError) {
+            showToast('Picker unavailable on this page');
+            return;
+          }
+          showToast('Click any image on the page  ·  Esc to cancel', 5000);
         });
       });
     });
 
-    srcClear.addEventListener('click', () => {
+    // ── Receive pick result from content script (relayed via background) ───
+    if (!window.__mt_pick_listener) {
+      window.__mt_pick_listener = true;
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg.type !== 'IMAGE_PICK_RESULT') return;
+        if (msg.cancelled || !msg.src) {
+          showToast('Pick cancelled');
+          return;
+        }
+        // Convert to base64 via canvas so we own a local copy
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const scale  = Math.min(1, 400 / img.naturalWidth);
+            canvas.width  = Math.round(img.naturalWidth  * scale);
+            canvas.height = Math.round(img.naturalHeight * scale);
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            state.uploadedImageData = dataUrl;
+            setPreviewImage(dataUrl);
+            srcPick?.classList.add('on');
+            srcAuto?.classList.remove('on');
+            srcUpload?.classList.remove('on');
+            showToast('Cover art picked ✓');
+          } catch {
+            // CORS-tainted canvas — store URL directly as fallback
+            state.uploadedImageData = null;
+            setPreviewImage(msg.src);
+            showToast('Picked (URL only — cross-origin image)');
+          }
+        };
+        img.onerror = () => showToast('Could not load that image');
+        img.src = msg.src;
+      });
+    }
+
+    srcClear?.addEventListener('click', () => {
       state.uploadedImageData = null;
-      srcAuto.classList.remove('on');
-      srcUpload.classList.remove('on');
+      srcAuto?.classList.remove('on');
+      srcUpload?.classList.remove('on');
       srcPick?.classList.remove('on');
       clearPreviewImage();
     });
@@ -772,15 +751,6 @@
           <button class="mact danger" id="modal-delete">Delete</button>
         </div>
         ${entry.notes ? `<div class="mnotes">${escHtml(entry.notes)}</div>` : ''}
-        ${(entry.altUrls && entry.altUrls.length) ? `
-        <div class="mnotes" style="margin-top:10px">
-          <div style="font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3);margin-bottom:5px">Reading sources</div>
-          ${[{url:entry.url,hostname:entry.hostname},...(entry.altUrls||[]).map((u,i)=>({url:u,hostname:(entry.altHostnames||[])[i]||u}))].filter(s=>s.url).map(s=>`
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-              <span style="font-size:10px;color:var(--txt2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.hostname||s.url)}</span>
-              <button class="mact" style="flex:0;white-space:nowrap;padding:3px 8px;font-size:9px" onclick="chrome.tabs.create({url:'${escHtml(s.url)}'})">Open</button>
-            </div>`).join('')}
-        </div>` : ''}
       </div>`;
 
     let tempCh = entry.chapter || 0;
@@ -1088,7 +1058,21 @@
       const session = await Sync.restoreSession();
       if (session) state.syncUser = session.username;
     } catch(_) {}
-    switchNav('today');
+
+    // Default to Add panel when on a reading site, otherwise Today
+    let startNav = 'today';
+    try {
+      await new Promise(resolve => {
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+          if (tabs[0]?.url) {
+            const hostname = new URL(tabs[0].url).hostname.replace(/^www\./, '');
+            if (detectTypeFromHostname(hostname)) startNav = 'add';
+          }
+          resolve();
+        });
+      });
+    } catch(_) {}
+    switchNav(startNav);
   }
 
   init();

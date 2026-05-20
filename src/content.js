@@ -65,103 +65,125 @@
     return g.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
+  // ── Image picker ────────────────────────────────────────────────────────────
+  // Activated by the popup (now running as a detached window) via START_IMAGE_PICK.
+  // Uses a floating highlight div that follows the cursor over images —
+  // this avoids modifying img styles directly, which was triggering site hover
+  // animations (expand effects, etc.) on many reading sites.
+
+  let _pickerActive = false;
+  let _banner       = null;
+  let _highlight    = null;
+  let _lastImg      = null;
+  let _pickResolve  = null; // stored so ESC can send a cancellation via runtime message
+
+  function startImagePicker() {
+    if (_pickerActive) return;
+    _pickerActive = true;
+
+    // ── Banner ─────────────────────────────────────────────────────────────
+    _banner = document.createElement('div');
+    _banner.id = '__mt_pick_banner';
+    Object.assign(_banner.style, {
+      position:   'fixed',
+      top:        '12px',
+      left:       '50%',
+      transform:  'translateX(-50%)',
+      zIndex:     '2147483647',
+      background: '#1a1e25',
+      color:      '#9d8fff',
+      fontFamily: 'monospace',
+      fontSize:   '12px',
+      letterSpacing: '.08em',
+      padding:    '8px 18px',
+      borderRadius: '6px',
+      border:     '1px solid #7c6af740',
+      pointerEvents: 'none',
+      whiteSpace: 'nowrap',
+    });
+    _banner.textContent = 'MangaTracker: click any image to use as cover art  ·  Esc to cancel';
+    document.body.appendChild(_banner);
+
+    // ── Highlight box (follows cursor, never touches img styles) ───────────
+    _highlight = document.createElement('div');
+    _highlight.id = '__mt_pick_highlight';
+    Object.assign(_highlight.style, {
+      position:      'fixed',
+      zIndex:        '2147483646',
+      outline:       '3px solid #7c6af7',
+      outlineOffset: '1px',
+      borderRadius:  '3px',
+      pointerEvents: 'none',
+      display:       'none',
+      boxSizing:     'border-box',
+    });
+    document.body.appendChild(_highlight);
+
+    document.addEventListener('keydown',   onKeyDown,   true);
+    document.addEventListener('mousemove', onMouseMove, true);
+    document.addEventListener('click',     onClick,     true);
+  }
+
+  function stopImagePicker(cancelled) {
+    if (!_pickerActive) return;
+    _pickerActive = false;
+    _banner?.remove();    _banner    = null;
+    _highlight?.remove(); _highlight = null;
+    _lastImg = null;
+    document.removeEventListener('keydown',   onKeyDown,   true);
+    document.removeEventListener('mousemove', onMouseMove, true);
+    document.removeEventListener('click',     onClick,     true);
+    // Notify the detached popup window that picking ended
+    chrome.runtime.sendMessage({ type: 'IMAGE_PICK_RESULT', cancelled: cancelled || false, src: '' });
+  }
+
+  function onKeyDown(e) {
+    if (e.key === 'Escape') { stopImagePicker(true); }
+  }
+
+  function onMouseMove(e) {
+    const img = e.target.closest('img');
+    if (img !== _lastImg) {
+      _lastImg = img;
+      if (img) {
+        const r = img.getBoundingClientRect();
+        Object.assign(_highlight.style, {
+          display: 'block',
+          left:    r.left   + 'px',
+          top:     r.top    + 'px',
+          width:   r.width  + 'px',
+          height:  r.height + 'px',
+        });
+        document.body.style.cursor = 'crosshair';
+      } else {
+        _highlight.style.display = 'none';
+        document.body.style.cursor = '';
+      }
+    }
+  }
+
+  function onClick(e) {
+    const img = e.target.closest('img');
+    if (!img) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const src = img.currentSrc || img.src || img.getAttribute('data-src') || '';
+    stopImagePicker(false);
+    chrome.runtime.sendMessage({ type: 'IMAGE_PICK_RESULT', cancelled: false, src });
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'GET_PAGE_INFO') {
       sendResponse(getPageInfo());
     }
-
-    // ── Image picker ──────────────────────────────────────────────────────────
-    // When the popup sends START_IMAGE_PICK, we enter a mode where hovering
-    // highlights images and clicking one sends its src back to the popup.
     if (msg.type === 'START_IMAGE_PICK') {
-      startImagePicker(sendResponse);
-      return true; // keep channel open for async response
+      startImagePicker();
+      sendResponse({ ok: true });
     }
     if (msg.type === 'CANCEL_IMAGE_PICK') {
-      stopImagePicker();
+      stopImagePicker(true);
       sendResponse({ ok: true });
     }
     return true;
   });
-
-  let _pickerActive = false;
-  let _overlay      = null;
-
-  function startImagePicker(sendResponse) {
-    if (_pickerActive) return;
-    _pickerActive = true;
-
-    // Dim the page and show a hint banner
-    _overlay = document.createElement('div');
-    _overlay.id = '__mt_pick_overlay';
-    Object.assign(_overlay.style, {
-      position: 'fixed', inset: '0', zIndex: '2147483646',
-      background: 'rgba(0,0,0,0.35)', pointerEvents: 'none',
-      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-    });
-    const banner = document.createElement('div');
-    Object.assign(banner.style, {
-      marginTop: '16px', background: '#1a1e25', color: '#9d8fff',
-      fontFamily: 'monospace', fontSize: '12px', letterSpacing: '.08em',
-      padding: '8px 16px', borderRadius: '6px', border: '1px solid #7c6af740',
-      pointerEvents: 'none',
-    });
-    banner.textContent = 'MangaTracker: click any image to use as cover art  ·  Esc to cancel';
-    _overlay.appendChild(banner);
-    document.body.appendChild(_overlay);
-
-    const onKeyDown = e => {
-      if (e.key === 'Escape') { cleanup(); sendResponse({ cancelled: true }); }
-    };
-
-    const onMouseOver = e => {
-      if (e.target.tagName !== 'IMG') return;
-      e.target.style.outline = '3px solid #7c6af7';
-      e.target.style.outlineOffset = '2px';
-      e.target.style.cursor = 'crosshair';
-    };
-
-    const onMouseOut = e => {
-      if (e.target.tagName !== 'IMG') return;
-      e.target.style.outline = '';
-      e.target.style.outlineOffset = '';
-      e.target.style.cursor = '';
-    };
-
-    const onClick = e => {
-      if (e.target.tagName !== 'IMG') return;
-      e.preventDefault();
-      e.stopPropagation();
-      const src = e.target.src || e.target.currentSrc || '';
-      cleanup();
-      sendResponse({ src });
-    };
-
-    function cleanup() {
-      _pickerActive = false;
-      _overlay?.remove(); _overlay = null;
-      document.removeEventListener('keydown',   onKeyDown,   true);
-      document.removeEventListener('mouseover', onMouseOver, true);
-      document.removeEventListener('mouseout',  onMouseOut,  true);
-      document.removeEventListener('click',     onClick,     true);
-      // Remove any leftover outlines
-      document.querySelectorAll('img').forEach(img => {
-        img.style.outline = '';
-        img.style.outlineOffset = '';
-        img.style.cursor = '';
-      });
-    }
-
-    document.addEventListener('keydown',   onKeyDown,   true);
-    document.addEventListener('mouseover', onMouseOver, true);
-    document.addEventListener('mouseout',  onMouseOut,  true);
-    document.addEventListener('click',     onClick,     true);
-  }
-
-  function stopImagePicker() {
-    // Sends a synthetic ESC to trigger cleanup if picker is active
-    if (_pickerActive) {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    }
-  }
 })();
