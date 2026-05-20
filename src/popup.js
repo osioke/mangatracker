@@ -92,65 +92,6 @@
     try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
   }
 
-  // ── Detect media type from hostname ───────────────────────────────────────
-  // Checks the site's domain against known patterns so the Type field is
-  // pre-filled when you open the extension on a reading site.
-  const SITE_TYPE_MAP = {
-    // Manhwa / Korean webtoon sites
-    manhwa: [
-      'manhwatop','manhwax','manhwaz','manhwasy','manhwaclan','manhwafreaks',
-      'manhwabuddy','manhwatv','manhwakid','manhwahentai','manhwa18','levelmanga',
-      'webtoon','webtoons','tapas','lezhin','myntoon','toonily','toonspur',
-      'manhwascan','manhwaland','manhwanelo','readmanhwa','manhwaplanet',
-      'manhuascan','10moons','disasterscans','asurascans','asuratoon',
-      'luminous','luminousscans','reaperscans','reaper','flamescans','flame',
-      'bato','batoto','isekaiscan','void-scans','voidscans','nitroscans',
-      'mangaclash','mangapuma','kunmanga','manhwahub','drakecomic',
-    ],
-    // Manga / Japanese
-    manga: [
-      'mangadex','mangaplus','viz','shonenjump','mangakakalot','manganelo',
-      'mangahere','mangafox','mangareader','mangapark','mangastream',
-      'mangachan','mangafreak','mangago','mangahasu','mangainn','mangajoy',
-      'mangalib','mangalichter','manganato','mangaonline','mangapill',
-      'mangasee','mangashiro','mangaslayer','mangasushi','mangaworld',
-      'nyxscans','nitropics','tcbscans','rawkuma','rawlh','alphascans',
-      'hatigarmscans','kaguya','sushiscan','mangabuddy','rawdevart',
-    ],
-    // Manhua / Chinese
-    manhua: [
-      'manhua','manhualike','manhuadb','manhuaes','manhuafast','manhuafree',
-      'manhuaplus','manhuascan','manhuatop','manhuazone','webcomics',
-      'bilibili','bilibilicomics','kuaikanmanhua','u17','dmzj','iqingge',
-      'copymanga','mangaowl','readmanhua','1stkissnovel','zinmanga',
-      'comick','comickfun','manhuaonline',
-    ],
-    // Anime
-    anime: [
-      'myanimelist','anilist','crunchyroll','funimation','hidive','netflix',
-      'primevideo','animepahe','gogoanime','zoro','zoroanime','aniwatch',
-      'aniwatchtv','9anime','kissanime','animixplay','animeultima',
-      'animehaven','animedao','animeland','animelab','animetosho',
-      'anidb','anichart','animeschedule',
-    ],
-  };
-
-  function detectTypeFromHostname(hostname) {
-    if (!hostname) return null;
-    const h = hostname.toLowerCase();
-    for (const [type, patterns] of Object.entries(SITE_TYPE_MAP)) {
-      for (const p of patterns) {
-        if (h.includes(p)) return type;
-      }
-    }
-    // Fallback: keyword scan on the hostname itself
-    if (h.includes('manhwa')) return 'manhwa';
-    if (h.includes('manhua')) return 'manhua';
-    if (h.includes('manga'))  return 'manga';
-    if (h.includes('anime') || h.includes('webtoon')) return 'anime';
-    return null;
-  }
-
   // ── Data load ──────────────────────────────────────────────────────────────
   async function loadAll() {
     [state.entries, state.sites, state.settings] = await Promise.all([
@@ -459,6 +400,41 @@
     }
 
     if (!state.editId) detectPageInfo();
+
+    // ── Link-to-existing-source panel ─────────────────────────────────────────
+    // Shown only when we're on a page that looks like a reading site (has a hostname)
+    // and there are existing entries to link to.
+    const linkRow    = $('link-source-row');
+    const linkSelect = $('link-source-select');
+    const linkBtn    = $('link-source-btn');
+    if (linkRow && linkSelect && linkBtn && state.entries.length && !state.editId) {
+      // Populate the dropdown
+      linkSelect.innerHTML = '<option value="">— pick an entry —</option>' +
+        state.entries.map(e => `<option value="${e.id}">${escHtml(e.title)}</option>`).join('');
+      linkRow.style.display = '';
+      // Wire add-source action
+      if (!linkBtn.dataset.wired) {
+        linkBtn.dataset.wired = '1';
+        linkBtn.addEventListener('click', async () => {
+          const targetId = linkSelect.value;
+          if (!targetId) { showToast('Pick an entry first'); return; }
+          const target = state.entries.find(e => e.id === targetId);
+          if (!target) return;
+          const url      = state.pageInfo?.url || '';
+          const hostname = state.pageInfo?.hostname || '';
+          if (!url) { showToast('No page URL detected'); return; }
+          target.altUrls      = [...(target.altUrls || []), url];
+          target.altHostnames = [...(target.altHostnames || []), hostname];
+          await Storage.saveEntry(target);
+          state.entries = await Storage.getEntries();
+          if (state.syncUser) Sync.scheduleAutoPush();
+          showToast(`Source added to "${target.title}"`);
+          switchNav('library');
+        });
+      }
+    } else if (linkRow) {
+      linkRow.style.display = 'none';
+    }
   }
 
   function detectPageInfo() {
@@ -484,12 +460,6 @@
     if ($('detect-name')) $('detect-name').textContent = info.title || '—';
     if ($('detect-site')) $('detect-site').textContent = info.hostname || '—';
     if ($('f-title') && !$('f-title').dataset.edited) $('f-title').value = info.title || '';
-
-    // Auto-set the Type dropdown from the site's hostname
-    const detectedType = detectTypeFromHostname(info.hostname);
-    if (detectedType && $('f-type') && !state.editId) {
-      $('f-type').value = detectedType;
-    }
 
     // Auto-set cover art preview from og:image if no upload yet
     if (!state.uploadedImageData && info.image) {
@@ -544,10 +514,11 @@
   }
 
   function wireImageUpload() {
-    const preview  = $('img-preview');
+    const preview   = $('img-preview');
     const fileInput = $('img-file-input');
     const srcAuto   = $('img-src-auto');
     const srcUpload = $('img-src-upload');
+    const srcPick   = $('img-src-pick');
     const srcClear  = $('img-src-clear');
 
     if (!preview || !fileInput || preview.dataset.wired) return;
@@ -560,10 +531,11 @@
       if (!file) return;
       const reader = new FileReader();
       reader.onload = e => {
-        state.uploadedImageData = e.target.result; // base64
+        state.uploadedImageData = e.target.result;
         setPreviewImage(e.target.result);
         srcUpload.classList.add('on');
         srcAuto.classList.remove('on');
+        srcPick?.classList.remove('on');
       };
       reader.readAsDataURL(file);
       fileInput.value = '';
@@ -573,16 +545,62 @@
       state.uploadedImageData = null;
       srcAuto.classList.add('on');
       srcUpload.classList.remove('on');
+      srcPick?.classList.remove('on');
       clearPreviewImage();
       if (state.pageInfo?.image) setPreviewImage(state.pageInfo.image);
     });
 
     srcUpload.addEventListener('click', () => fileInput.click());
 
+    // ── Pick from page ───────────────────────────────────────────────────────
+    // Closes the popup, activates a crosshair picker on the page, and when the
+    // user clicks an image the src comes back here and is stored as imageData.
+    // We convert it via a canvas so we own a data-URL copy (avoids CORS issues
+    // on the extension's CSP when the image later renders in the popup).
+    srcPick?.addEventListener('click', () => {
+      showToast('Click an image on the page  ·  Esc to cancel', 4000);
+      chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+        if (!tabs[0]) return;
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_IMAGE_PICK' }, response => {
+          if (chrome.runtime.lastError || !response) return;
+          if (response.cancelled || !response.src) return;
+
+          // Fetch the image and convert to base64 so we own a local copy
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              // Cap at 400px wide to keep storage reasonable
+              const scale = Math.min(1, 400 / img.naturalWidth);
+              canvas.width  = Math.round(img.naturalWidth  * scale);
+              canvas.height = Math.round(img.naturalHeight * scale);
+              canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+              state.uploadedImageData = dataUrl;
+              setPreviewImage(dataUrl);
+              srcPick?.classList.add('on');
+              srcAuto.classList.remove('on');
+              srcUpload.classList.remove('on');
+              showToast('Cover art picked ✓');
+            } catch {
+              // Canvas CORS tainted — fall back to using the src URL directly
+              state.uploadedImageData = null;
+              setPreviewImage(response.src);
+              showToast('Picked (URL only — CORS restricted)');
+            }
+          };
+          img.onerror = () => showToast('Could not load that image');
+          img.src = response.src;
+        });
+      });
+    });
+
     srcClear.addEventListener('click', () => {
       state.uploadedImageData = null;
       srcAuto.classList.remove('on');
       srcUpload.classList.remove('on');
+      srcPick?.classList.remove('on');
       clearPreviewImage();
     });
   }
@@ -754,6 +772,15 @@
           <button class="mact danger" id="modal-delete">Delete</button>
         </div>
         ${entry.notes ? `<div class="mnotes">${escHtml(entry.notes)}</div>` : ''}
+        ${(entry.altUrls && entry.altUrls.length) ? `
+        <div class="mnotes" style="margin-top:10px">
+          <div style="font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3);margin-bottom:5px">Reading sources</div>
+          ${[{url:entry.url,hostname:entry.hostname},...(entry.altUrls||[]).map((u,i)=>({url:u,hostname:(entry.altHostnames||[])[i]||u}))].filter(s=>s.url).map(s=>`
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="font-size:10px;color:var(--txt2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.hostname||s.url)}</span>
+              <button class="mact" style="flex:0;white-space:nowrap;padding:3px 8px;font-size:9px" onclick="chrome.tabs.create({url:'${escHtml(s.url)}'})">Open</button>
+            </div>`).join('')}
+        </div>` : ''}
       </div>`;
 
     let tempCh = entry.chapter || 0;

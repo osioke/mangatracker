@@ -490,11 +490,11 @@ body.fullpage .modal-bg{position:fixed}
       <button class="nbtn" data-nav="library" title="Library">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v13"/><path d="M4 19a2 2 0 0 0 2 2h13a1 1 0 0 0 1-1v-1"/><path d="M8 11h8M8 7h8M8 15h5"/></svg>
       </button>
+      <div class="nsep-push"></div>
+      <div class="nsep"></div>
       <button class="nbtn" data-nav="sites" title="Sites">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8"/><path d="M12 3a14.5 14.5 0 0 1 3 9 14.5 14.5 0 0 1-3 9 14.5 14.5 0 0 1-3-9 14.5 14.5 0 0 1 3-9z"/></svg>
       </button>
-      <div class="nsep-push"></div>
-      <div class="nsep"></div>
       <button class="nbtn" data-nav="add" title="Add entry">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
       </button>
@@ -564,6 +564,20 @@ body.fullpage .modal-bg{position:fixed}
             </div>
           </div>
 
+          <!-- Link this URL as an additional source on an existing entry -->
+          <div class="field" id="link-source-row" style="display:none">
+            <label class="flabel">Add as source for existing entry instead?</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select class="fselect" id="link-source-select" style="flex:1">
+                <option value="">— pick an entry —</option>
+              </select>
+              <button class="hbtn" id="link-source-btn" style="white-space:nowrap">Add source</button>
+            </div>
+            <div style="font-size:9px;color:var(--txt3);margin-top:4px;letter-spacing:.04em">
+              This saves the current URL as an alternate reading source on the selected entry, rather than creating a new one.
+            </div>
+          </div>
+
           <div class="img-upload-wrap">
             <div class="img-preview" id="img-preview" title="Click to upload cover art">
               <span id="img-preview-emoji">📖</span>
@@ -574,6 +588,7 @@ body.fullpage .modal-bg{position:fixed}
               <div class="img-src-row">
                 <button class="img-src-btn on" id="img-src-auto">Auto</button>
                 <button class="img-src-btn" id="img-src-upload">Upload</button>
+                <button class="img-src-btn" id="img-src-pick">Pick</button>
                 <button class="img-src-btn" id="img-src-clear">Clear</button>
               </div>
             </div>
