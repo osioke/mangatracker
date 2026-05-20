@@ -1054,13 +1054,9 @@
     e.target.value = '';
   }
 
-  // ── Full page toggle ───────────────────────────────────────────────────────
-  function toggleFullPage() {
-    const full = document.body.classList.toggle('fullpage');
-    document.documentElement.style.width = full ? '800px' : '360px';
-    $('fullbtn').innerHTML = full
-      ? `<svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M4 1H1v3M7 10h3V7M1 4l3.5 3.5M10 7 6.5 3.5"/></svg> Compact`
-      : `<svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M7 1h3v3M4 10H1V7M10 4l-3.5 3.5M1 7l3.5-3.5"/></svg> Full page`;
+  // ── Close sidebar ──────────────────────────────────────────────────────────
+  function closeSidebar() {
+    window.close();
   }
 
   // ── Wire all static events ─────────────────────────────────────────────────
@@ -1077,7 +1073,7 @@
       })
     );
     // Header buttons
-    $('fullbtn')?.addEventListener('click', toggleFullPage);
+    $('closebtn')?.addEventListener('click', closeSidebar);
     $('settingsbtn')?.addEventListener('click', () => switchNav('settings'));
     // Save entry
     $('save-btn')?.addEventListener('click', saveEntry);

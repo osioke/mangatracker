@@ -2,7 +2,12 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('MangaTracker installed');
 });
 
-// ── Relay IMAGE_PICK_RESULT from content script → detached popup window ───────
+// Open the side panel when the toolbar icon is clicked
+chrome.action.onClicked.addListener((tab) => {
+  chrome.sidePanel.open({ tabId: tab.id });
+});
+
+// ── Relay IMAGE_PICK_RESULT from content script → side panel ──────────────────
 // Content scripts can't message specific windows directly; they broadcast to
 // the runtime and the background worker forwards to all extension views.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -11,7 +16,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === 'IMAGE_PICK_RESULT') {
-    // Forward to all open extension views (the detached popup window)
+    // Forward to all open extension views (the side panel)
     chrome.runtime.sendMessage(msg).catch(() => {});
     return true;
   }
