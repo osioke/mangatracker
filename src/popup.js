@@ -92,6 +92,46 @@
     try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
   }
 
+  // ── Sources helpers ────────────────────────────────────────────────────────
+  function buildSourceRow(url = '', isPrimary = false) {
+    const row = document.createElement('div');
+    row.className = 'source-row';
+    row.innerHTML = `
+      <input class="finput" type="url" placeholder="https://…" value="${escHtml(url)}">
+      <button class="source-label${isPrimary ? ' primary' : ''}" title="Set as primary source">${isPrimary ? '★ primary' : '☆ set primary'}</button>
+      <button class="source-remove" title="Remove">✕</button>
+    `;
+    const labelBtn = row.querySelector('.source-label');
+    labelBtn.addEventListener('click', () => {
+      const list = $('sources-list');
+      list.querySelectorAll('.source-label').forEach(b => {
+        b.classList.remove('primary');
+        b.textContent = '☆ set primary';
+      });
+      labelBtn.classList.add('primary');
+      labelBtn.textContent = '★ primary';
+    });
+    row.querySelector('.source-remove').addEventListener('click', () => row.remove());
+    return row;
+  }
+
+  function renderSources(sources) {
+    const list = $('sources-list');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!sources || !sources.length) return;
+    sources.forEach((s, i) => list.appendChild(buildSourceRow(s.url, s.primary || i === 0)));
+  }
+
+  function getSourcesFromForm() {
+    const list = $('sources-list');
+    if (!list) return [];
+    return [...list.querySelectorAll('.source-row')].map(row => ({
+      url:     row.querySelector('input').value.trim(),
+      primary: row.querySelector('.source-label').classList.contains('primary'),
+    })).filter(s => s.url);
+  }
+
   // ── Data load ──────────────────────────────────────────────────────────────
   async function loadAll() {
     [state.entries, state.sites, state.settings] = await Promise.all([
@@ -426,6 +466,12 @@
     if ($('detect-site')) $('detect-site').textContent = info.hostname || '—';
     if ($('f-title') && !$('f-title').dataset.edited) $('f-title').value = info.title || '';
 
+    // Auto-add detected page URL as first source if sources list is empty
+    const list = $('sources-list');
+    if (list && !list.querySelector('.source-row') && info.url) {
+      list.appendChild(buildSourceRow(info.url, true));
+    }
+
     // Auto-set cover art preview from og:image if no upload yet
     if (!state.uploadedImageData && info.image) {
       setPreviewImage(info.image);
@@ -671,14 +717,17 @@
       : statusRaw === 'completed'? 'completed' : 'ongoing';
     const releaseDays = [...document.querySelectorAll('#day-chips .dchip.on')].map(b => parseInt(b.dataset.day));
     const freq = parseInt(document.querySelector('#freq-chips .fchip.on')?.dataset.freq || '1');
+    const sources = getSourcesFromForm();
+    const primarySource = sources.find(s => s.primary) || sources[0];
     return {
       title: $('f-title')?.value.trim() || '',
       type:  $('f-type')?.value || 'manhwa',
       chapter: parseInt($('f-chapter')?.value || '0'),
       tropes, vibes, mode, status, releaseDays, releaseFreq: freq,
       notes: $('f-notes')?.value.trim() || '',
-      url: state.pageInfo?.url || '',
-      hostname: state.pageInfo?.hostname || '',
+      sources,
+      url: primarySource?.url || state.pageInfo?.url || '',
+      hostname: primarySource ? getHostname(primarySource.url) : (state.pageInfo?.hostname || ''),
       image: (!state.uploadedImageData && state.pageInfo?.image) ? state.pageInfo.image : '',
       imageData: state.uploadedImageData || '',
     };
@@ -724,6 +773,9 @@
     if ($('detect-name')) $('detect-name').textContent = '—';
     if ($('detect-site')) $('detect-site').textContent = '—';
     if ($('save-btn'))    $('save-btn').textContent    = 'Save to library';
+    // reset sources
+    const sourcesList = $('sources-list');
+    if (sourcesList) sourcesList.innerHTML = '';
     // reset img source buttons
     $('img-src-auto')?.classList.add('on');
     $('img-src-upload')?.classList.remove('on');
@@ -741,6 +793,11 @@
     if ($('detect-url'))  $('detect-url').textContent  = entry.url || '';
     if ($('detect-name')) $('detect-name').textContent = entry.title;
     if ($('detect-site')) $('detect-site').textContent = entry.hostname || '';
+    // Restore sources — fall back to legacy single URL if no sources array yet
+    const existingSources = entry.sources && entry.sources.length
+      ? entry.sources
+      : (entry.url ? [{ url: entry.url, primary: true }] : []);
+    renderSources(existingSources);
 
     const imgSrc = entry.imageData || entry.image || '';
     if (imgSrc) setPreviewImage(imgSrc);
@@ -828,6 +885,16 @@
           <button class="mact danger" id="modal-delete">Delete</button>
         </div>
         ${entry.notes ? `<div class="mnotes">${escHtml(entry.notes)}</div>` : ''}
+        ${(entry.sources && entry.sources.length > 1) ? `
+        <div class="msources">
+          <div class="msources-label">Sources</div>
+          ${entry.sources.map(s => `
+            <a class="msource-link" href="${escHtml(s.url)}" target="_blank" rel="noopener">
+              ${s.primary ? `<span class="msource-primary">★</span>` : ''}
+              <span class="msource-host">${escHtml(getHostname(s.url))}</span>
+              <span class="msource-arrow">↗</span>
+            </a>`).join('')}
+        </div>` : ''}
       </div>`;
 
     let tempCh = entry.chapter || 0;
@@ -1117,6 +1184,13 @@
     });
     // Image upload
     wireImageUpload();
+    // Sources
+    $('sources-add-btn')?.addEventListener('click', () => {
+      const list = $('sources-list');
+      const hasAny = list.querySelectorAll('.source-row').length > 0;
+      list.appendChild(buildSourceRow('', !hasAny));
+      list.querySelector('.source-row:last-child input')?.focus();
+    });
     // Sync
     wireSync();
   }
