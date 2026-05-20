@@ -132,6 +132,94 @@
     })).filter(s => s.url);
   }
 
+  // ── Duplicate / match detection ────────────────────────────────────────────
+  function normaliseTitle(t) {
+    return (t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function findMatch(pageInfo) {
+    if (!pageInfo) return null;
+    const pageHost  = pageInfo.hostname || getHostname(pageInfo.url || '');
+    const pageNorm  = normaliseTitle(pageInfo.title);
+
+    for (const entry of state.entries) {
+      // Collect all hostnames for this entry
+      const entryHosts = new Set();
+      if (entry.hostname) entryHosts.add(entry.hostname);
+      (entry.sources || []).forEach(s => {
+        const h = getHostname(s.url);
+        if (h) entryHosts.add(h);
+      });
+
+      const sameHost  = pageHost && entryHosts.has(pageHost);
+      const titleMatch = pageNorm && pageNorm === normaliseTitle(entry.title);
+
+      if (sameHost && titleMatch) return { type: 'exact', entry };
+      if (!sameHost && titleMatch) return { type: 'newsource', entry };
+    }
+    return null;
+  }
+
+  function renderMatchCard(match, pageInfo) {
+    const el = $('match-card');
+    if (!el) return;
+
+    if (!match) { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+    const { type, entry } = match;
+    const isExact     = type === 'exact';
+    const imgSrc      = entry.imageData || entry.image || '';
+    const artEl       = imgSrc
+      ? `<img src="${escHtml(imgSrc)}" alt="" style="width:36px;height:49px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">`
+      : `<div style="width:36px;height:49px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${{manhwa:'📖',manga:'📚',manhua:'📕',anime:'🎬',webtoon:'🌐'}[entry.type]||'📖'}</div>`;
+
+    el.className = `match-card${isExact ? '' : ' newsource'}`;
+    el.innerHTML = `
+      <div class="match-banner">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        ${isExact ? 'Already in your library' : 'Found in library — different site'}
+      </div>
+      <div class="match-entry">
+        ${artEl}
+        <div class="match-info">
+          <div class="match-title">${escHtml(entry.title)}</div>
+          <div class="match-meta">${escHtml(entry.hostname || '')} · ${chLabel(entry)} ${entry.chapter || 0} · ${escHtml(entry.status || 'ongoing')}</div>
+        </div>
+      </div>
+      <div class="match-actions">
+        ${isExact
+          ? `<button class="match-btn primary" id="match-edit-btn">Edit this entry</button>
+             <button class="match-btn" id="match-ignore-btn">Add as new anyway</button>`
+          : `<button class="match-btn green" id="match-addsrc-btn">Add as new source</button>
+             <button class="match-btn" id="match-ignore-btn">Add as new anyway</button>`
+        }
+      </div>`;
+
+    el.style.display = '';
+
+    $('match-edit-btn')?.addEventListener('click', () => {
+      el.style.display = 'none';
+      loadEntryIntoForm(entry);
+    });
+
+    $('match-addsrc-btn')?.addEventListener('click', () => {
+      el.style.display = 'none';
+      loadEntryIntoForm(entry);
+      // Append the current page URL as an additional source if not already present
+      const list = $('sources-list');
+      if (list && pageInfo?.url) {
+        const incomingHost = getHostname(pageInfo.url);
+        const already = [...list.querySelectorAll('.source-row input')]
+          .some(inp => getHostname(inp.value) === incomingHost);
+        if (!already) list.appendChild(buildSourceRow(pageInfo.url, false));
+      }
+    });
+
+    $('match-ignore-btn')?.addEventListener('click', () => {
+      el.style.display = 'none';
+    });
+  }
+
   // ── Data load ──────────────────────────────────────────────────────────────
   async function loadAll() {
     [state.entries, state.sites, state.settings] = await Promise.all([
@@ -466,11 +554,19 @@
     if ($('detect-site')) $('detect-site').textContent = info.hostname || '—';
     if ($('f-title') && !$('f-title').dataset.edited) $('f-title').value = info.title || '';
 
+    // Auto-fill chapter from URL if detected and field hasn't been manually edited
+    if (info.chapter && $('f-chapter') && !$('f-chapter').dataset.edited) {
+      $('f-chapter').value = info.chapter;
+    }
+
     // Auto-add detected page URL as first source if sources list is empty
     const list = $('sources-list');
     if (list && !list.querySelector('.source-row') && info.url) {
       list.appendChild(buildSourceRow(info.url, true));
     }
+
+    // Duplicate / match detection — only on fresh adds, not when editing
+    if (!state.editId) renderMatchCard(findMatch(info), info);
 
     // Auto-set cover art preview from og:image if no upload yet
     if (!state.uploadedImageData && info.image) {
@@ -758,7 +854,7 @@
 
   function resetAddForm() {
     if ($('f-title'))   { $('f-title').value = '';  delete $('f-title').dataset.edited; }
-    if ($('f-chapter')) $('f-chapter').value = '0';
+    if ($('f-chapter')) { $('f-chapter').value = '0'; delete $('f-chapter').dataset.edited; }
     if ($('f-notes'))   $('f-notes').value   = '';
     document.querySelectorAll('#trope-pills .pill.on, #vibe-pills .pill.on').forEach(p => p.classList.remove('on'));
     document.querySelectorAll('#day-chips .dchip.on').forEach(p => p.classList.remove('on'));
@@ -773,6 +869,7 @@
     if ($('detect-name')) $('detect-name').textContent = '—';
     if ($('detect-site')) $('detect-site').textContent = '—';
     if ($('save-btn'))    $('save-btn').textContent    = 'Save to library';
+    renderMatchCard(null);
     // reset sources
     const sourcesList = $('sources-list');
     if (sourcesList) sourcesList.innerHTML = '';
@@ -1163,8 +1260,9 @@
     document.querySelectorAll('#day-chips .dchip').forEach(btn =>
       btn.addEventListener('click', () => btn.classList.toggle('on'))
     );
-    // Title edit flag
-    $('f-title')?.addEventListener('input', () => { $('f-title').dataset.edited = '1'; });
+    // Edit flags — prevent auto-detection from overwriting manual input
+    $('f-title')?.addEventListener('input',   () => { $('f-title').dataset.edited   = '1'; });
+    $('f-chapter')?.addEventListener('input', () => { $('f-chapter').dataset.edited = '1'; });
     // Library filters
     $('lib-search')?.addEventListener('input', e => {
       state.libSearch = e.target.value;

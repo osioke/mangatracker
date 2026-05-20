@@ -423,6 +423,51 @@ html,body{
 }
 .img-src-btn.on{border-color:var(--acc2);color:var(--acc2);background:var(--bg3)}
 
+/* ── Match card ──────────────────────────── */
+.match-card{
+  border-radius:var(--radius);border:1px solid var(--acc2);
+  background:var(--bg2);margin-bottom:10px;overflow:hidden;
+}
+.match-card.newsource{ border-color:var(--green); }
+.match-banner{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 12px;
+  background:var(--acc-dim);
+  font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--acc2);font-weight:500;
+}
+.match-card.newsource .match-banner{
+  background:#3ecf8e15;color:var(--green);
+}
+.match-banner svg{flex-shrink:0}
+.match-entry{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+}
+.match-info{flex:1;min-width:0}
+.match-title{
+  font-size:11px;color:var(--txt);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;
+}
+.match-meta{font-size:9px;color:var(--txt3);letter-spacing:.05em}
+.match-actions{
+  display:flex;gap:6px;padding:0 12px 10px;flex-wrap:wrap;
+}
+.match-btn{
+  flex:1;padding:6px 10px;border-radius:var(--radius);border:1px solid var(--line2);
+  background:var(--bg3);color:var(--txt2);font-family:var(--font);
+  font-size:9px;letter-spacing:.08em;cursor:pointer;transition:all .12s;
+  text-align:center;white-space:nowrap;
+}
+.match-btn:hover{border-color:var(--line3);color:var(--txt)}
+.match-btn.primary{
+  background:var(--acc-dim);border-color:var(--acc2);color:var(--acc2);
+}
+.match-btn.primary:hover{background:#7c6af730}
+.match-btn.green{
+  background:#3ecf8e15;border-color:var(--green);color:var(--green);
+}
+.match-btn.green:hover{background:#3ecf8e25}
+
 /* ── Sources ─────────────────────────────── */
 .source-row{
   display:flex;align-items:center;gap:5px;margin-bottom:5px;
@@ -574,6 +619,7 @@ html,body{
 
         <!-- ADD panel -->
         <div class="panel" id="pane-add">
+          <div id="match-card" style="display:none"></div>
           <div class="detect" id="detect-card">
             <div class="dart" id="detect-art">📖</div>
             <div class="dinfo">

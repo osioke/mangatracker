@@ -7,19 +7,44 @@
     'mecha','sports','psychological','thriller','mystery'
   ];
 
+  function cleanTitle(raw, hostname) {
+    // Strip after | always — it's almost never part of a real title
+    raw = raw.replace(/\s*\|.+$/, '');
+    // Strip after ' - ' (space-hyphen-space) only when the trailing segment
+    // looks like a site name: matches hostname, or is ≤30 chars with no spaces
+    raw = raw.replace(/\s+-\s+(.+)$/, (full, after) => {
+      const host = hostname.replace(/^www\./, '').toLowerCase();
+      const seg  = after.trim();
+      const looksLikeSiteName = host.includes(seg.toLowerCase()) ||
+                                seg.toLowerCase().includes(host.split('.')[0]) ||
+                                (seg.length <= 30 && !/\s/.test(seg));
+      return looksLikeSiteName ? '' : full;
+    });
+    // Strip stray trailing non-word punctuation (·, », —, etc.)
+    raw = raw.replace(/[\s·»—–|]+$/, '');
+    return raw.trim();
+  }
+
   function getPageInfo() {
     const ogTitle    = document.querySelector('meta[property="og:title"]');
     const ogImage    = document.querySelector('meta[property="og:image"]');
     const twitterImg = document.querySelector('meta[name="twitter:image"]');
 
     let title = ogTitle?.content || document.title || '';
-    title = title.replace(/\s*[-|]\s*.+$/, '').trim();
+    title = cleanTitle(title, location.hostname);
 
     const image = ogImage?.content || twitterImg?.content || '';
     const hostname = location.hostname.replace(/^www\./, '');
     const genres = detectGenres();
 
-    return { title, image, url: location.href, hostname, genres };
+    return { title, image, url: location.href, hostname, genres, chapter: detectChapter() };
+  }
+
+  function detectChapter() {
+    // Match patterns like /chapter/212, /chapter-71, /ch-14, /ch/14, /episode/5
+    const path = location.pathname.toLowerCase();
+    const m = path.match(/(?:chapter|chap|ch|episode|ep)[-\/](\d+)/i);
+    return m ? parseInt(m[1], 10) : null;
   }
 
   function detectGenres() {
