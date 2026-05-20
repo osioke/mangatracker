@@ -20,7 +20,8 @@
     "storage",
     "tabs",
     "activeTab",
-    "windows"
+    "windows",
+    "scripting"
   ],
   "host_permissions": [
     "https://identitytoolkit.googleapis.com/*",

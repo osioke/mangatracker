@@ -518,21 +518,98 @@
     srcUpload?.addEventListener('click', () => fileInput.click());
 
     // ── Pick from page ─────────────────────────────────────────────────────
-    // The popup window closes when focus moves to the page, so we open a
-    // detached browser window (type:'panel') that stays alive. Content.js
-    // broadcasts IMAGE_PICK_RESULT via runtime.sendMessage, background.js
-    // forwards it, and we listen here.
+    // Uses chrome.scripting.executeScript to inject the picker directly into
+    // the page. This is reliable regardless of whether content.js has already
+    // loaded — it always runs fresh. The injected function sets up the banner,
+    // highlight box, and event listeners, then sends IMAGE_PICK_RESULT back
+    // via chrome.runtime.sendMessage when the user clicks an image or presses Esc.
     srcPick?.addEventListener('click', () => {
       chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
         if (!tabs[0]) { showToast('No active tab found'); return; }
 
-        // Tell content script to start picker mode
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_IMAGE_PICK' }, resp => {
-          if (chrome.runtime.lastError) {
-            showToast('Picker unavailable on this page');
-            return;
+        chrome.scripting.executeScript({
+          target: { tabId: tabs[0].id },
+          func: () => {
+            // Idempotent — don't start a second picker if one is already active
+            if (window.__mt_picker_active) return;
+            window.__mt_picker_active = true;
+
+            const banner = document.createElement('div');
+            banner.id = '__mt_pick_banner';
+            Object.assign(banner.style, {
+              position: 'fixed', top: '12px', left: '50%',
+              transform: 'translateX(-50%)', zIndex: '2147483647',
+              background: '#1a1e25', color: '#9d8fff',
+              fontFamily: 'monospace', fontSize: '12px', letterSpacing: '.08em',
+              padding: '8px 18px', borderRadius: '6px',
+              border: '1px solid #7c6af740', pointerEvents: 'none', whiteSpace: 'nowrap',
+            });
+            banner.textContent = 'MangaTracker: click any image to use as cover art  ·  Esc to cancel';
+            document.body.appendChild(banner);
+
+            const hl = document.createElement('div');
+            hl.id = '__mt_pick_hl';
+            Object.assign(hl.style, {
+              position: 'fixed', zIndex: '2147483646', display: 'none',
+              outline: '3px solid #7c6af7', outlineOffset: '1px',
+              borderRadius: '3px', pointerEvents: 'none', boxSizing: 'border-box',
+            });
+            document.body.appendChild(hl);
+
+            let lastImg = null;
+
+            function cleanup() {
+              window.__mt_picker_active = false;
+              banner.remove(); hl.remove();
+              document.body.style.cursor = '';
+              document.removeEventListener('keydown',   onKey,  true);
+              document.removeEventListener('mousemove', onMove, true);
+              document.removeEventListener('click',     onClk,  true);
+            }
+
+            function onKey(e) {
+              if (e.key !== 'Escape') return;
+              cleanup();
+              chrome.runtime.sendMessage({ type: 'IMAGE_PICK_RESULT', cancelled: true, src: '' });
+            }
+
+            function onMove(e) {
+              const img = e.target.closest('img');
+              if (img === lastImg) return;
+              lastImg = img;
+              if (img) {
+                const r = img.getBoundingClientRect();
+                Object.assign(hl.style, {
+                  display: 'block',
+                  left: r.left + 'px', top: r.top + 'px',
+                  width: r.width + 'px', height: r.height + 'px',
+                });
+                document.body.style.cursor = 'crosshair';
+              } else {
+                hl.style.display = 'none';
+                document.body.style.cursor = '';
+              }
+            }
+
+            function onClk(e) {
+              const img = e.target.closest('img');
+              if (!img) return;
+              e.preventDefault(); e.stopPropagation();
+              const src = img.currentSrc || img.src || img.getAttribute('data-src') || '';
+              cleanup();
+              chrome.runtime.sendMessage({ type: 'IMAGE_PICK_RESULT', cancelled: false, src });
+            }
+
+            document.addEventListener('keydown',   onKey,  true);
+            document.addEventListener('mousemove', onMove, true);
+            document.addEventListener('click',     onClk,  true);
           }
-          showToast('Click any image on the page  ·  Esc to cancel', 5000);
+        }, (results) => {
+          if (chrome.runtime.lastError) {
+            showToast('Picker unavailable — try refreshing the page');
+          } else {
+            showToast('Click any image on the page  ·  Esc to cancel', 5000);
+          }
         });
       });
     });
@@ -1059,7 +1136,20 @@
       if (session) state.syncUser = session.username;
     } catch(_) {}
 
-    switchNav('add');
+    // Default to Add panel when on a reading site, otherwise Today
+    let startNav = 'today';
+    try {
+      await new Promise(resolve => {
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+          if (tabs[0]?.url) {
+            const hostname = new URL(tabs[0].url).hostname.replace(/^www\./, '');
+            if (detectTypeFromHostname(hostname)) startNav = 'add';
+          }
+          resolve();
+        });
+      });
+    } catch(_) {}
+    switchNav(startNav);
   }
 
   init();
