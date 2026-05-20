@@ -1136,20 +1136,7 @@
       if (session) state.syncUser = session.username;
     } catch(_) {}
 
-    // Default to Add panel when on a reading site, otherwise Today
-    let startNav = 'today';
-    try {
-      await new Promise(resolve => {
-        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-          if (tabs[0]?.url) {
-            const hostname = new URL(tabs[0].url).hostname.replace(/^www\./, '');
-            if (detectTypeFromHostname(hostname)) startNav = 'add';
-          }
-          resolve();
-        });
-      });
-    } catch(_) {}
-    switchNav(startNav);
+    switchNav('add');
   }
 
   init();
