@@ -162,11 +162,20 @@ html,body{
 .tag-cook{background:#f0a04b14;color:var(--amber);border:1px solid #f0a04b28}
 .tag-soon{background:#ffffff08;color:var(--txt3);border:1px solid var(--line2)}
 
+.mark-read-btn{
+  display:block;font-size:9px;padding:2px 6px;border-radius:4px;
+  border:1px solid var(--green)30;background:var(--green)10;color:var(--green);
+  font-family:var(--font);cursor:pointer;margin-top:3px;transition:all .12s;
+  letter-spacing:.04em;white-space:nowrap;
+}
+.mark-read-btn:hover{background:var(--green)22;border-color:var(--green)60}
+
 .sdot{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:4px;vertical-align:middle}
 .dot-on{background:var(--green)}
 .dot-cook{background:var(--amber)}
 .dot-drop{background:var(--red)}
 .dot-done{background:var(--txt3)}
+.dot-season{background:#a78bfa}
 
 /* ── Library controls ────────────────────── */
 .libctrl{display:flex;gap:6px;margin-bottom:12px;align-items:center}
@@ -606,6 +615,7 @@ html,body{
               <option value="ongoing">Following</option>
               <option value="cooking">Cooking</option>
               <option value="completed">Completed</option>
+              <option value="season_end">Season End</option>
               <option value="dropped">Dropped</option>
             </select>
           </div>
@@ -750,6 +760,7 @@ html,body{
                 <button class="pill on" data-group="status">Ongoing</button>
                 <button class="pill" data-group="status">Completed</button>
                 <button class="pill" data-group="status">Hiatus</button>
+                <button class="pill" data-group="status">Season End</button>
                 <button class="pill" data-group="status">Dropped</button>
               </div>
             </div>

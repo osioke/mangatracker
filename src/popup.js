@@ -47,9 +47,10 @@
   }
 
   function statusDot(entry) {
-    if (entry.status === 'dropped')   return '<span class="sdot dot-drop"></span>';
-    if (entry.mode   === 'cooking')   return '<span class="sdot dot-cook"></span>';
-    if (entry.status === 'completed') return '<span class="sdot dot-done"></span>';
+    if (entry.status === 'dropped')    return '<span class="sdot dot-drop"></span>';
+    if (entry.mode   === 'cooking')    return '<span class="sdot dot-cook"></span>';
+    if (entry.status === 'completed')  return '<span class="sdot dot-done"></span>';
+    if (entry.status === 'season_end') return '<span class="sdot dot-season"></span>';
     return '<span class="sdot dot-on"></span>';
   }
 
@@ -309,7 +310,8 @@
     if (!c) return;
     const { settings, entries, selectedDay } = state;
     const todayReleases = entries.filter(e =>
-      e.releaseDays && e.releaseDays.includes(selectedDay) && e.status !== 'dropped'
+      e.releaseDays && e.releaseDays.includes(selectedDay) &&
+      e.status !== 'dropped' && e.status !== 'season_end'
     );
     const cookReady = entries.filter(e =>
       e.mode === 'cooking' && e.status !== 'dropped' &&
@@ -328,7 +330,7 @@
     }
     if (todayReleases.length) {
       html += `<div class="slabel">New releases</div>`;
-      html += todayReleases.map(e => entryRow(e, `<span class="tag tag-new">new</span>`)).join('');
+      html += todayReleases.map(e => entryRow(e, `<span class="tag tag-new">new</span>`, true)).join('');
     }
     if (cookReady.length) {
       html += `<div class="slabel sgap">Ready to read — cooking done</div>`;
@@ -372,8 +374,11 @@
   }
 
   // ── Entry row ──────────────────────────────────────────────────────────────
-  function entryRow(entry, tagHtml = '') {
+  function entryRow(entry, tagHtml = '', showMarkRead = false) {
     const meta = [entry.type, ...(entry.tropes || []).slice(0,2)].filter(Boolean).join(' · ');
+    const markBtn = showMarkRead
+      ? `<button class="mark-read-btn" data-id="${entry.id}" title="Mark as read">✓ +1</button>`
+      : '';
     return `<div class="entry" data-id="${entry.id}">
       ${artHtml(entry, 32)}
       <div class="ebody">
@@ -383,13 +388,33 @@
       <div class="eright">
         <div class="echnum">${chLabel(entry)} ${entry.chapter || 0}</div>
         ${tagHtml}
+        ${markBtn}
       </div>
     </div>`;
   }
 
   function attachEntryClicks(container) {
     container.querySelectorAll('.entry').forEach(row =>
-      row.addEventListener('click', () => openDetail(row.dataset.id))
+      row.addEventListener('click', e => {
+        // Don't open detail modal if the mark-read button was clicked
+        if (e.target.closest('.mark-read-btn')) return;
+        openDetail(row.dataset.id);
+      })
+    );
+    container.querySelectorAll('.mark-read-btn').forEach(btn =>
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        const entry = state.entries.find(en => en.id === id);
+        if (!entry) return;
+        entry.chapter  = (entry.chapter || 0) + 1;
+        entry.lastRead = Date.now();
+        await Storage.saveEntry(entry);
+        state.entries = await Storage.getEntries();
+        showToast(`${chLabel(entry)} ${entry.chapter} marked read`);
+        if (state.syncUser) Sync.scheduleAutoPush();
+        renderCurrentPanel();
+      })
     );
   }
 
@@ -405,10 +430,11 @@
       }
       if (state.libTypeFilter && e.type !== state.libTypeFilter) return false;
       if (state.libStatusFilter) {
-        if (state.libStatusFilter === 'ongoing'   && e.mode !== 'following')    return false;
-        if (state.libStatusFilter === 'cooking'   && e.mode !== 'cooking')      return false;
-        if (state.libStatusFilter === 'completed' && e.status !== 'completed')  return false;
-        if (state.libStatusFilter === 'dropped'   && e.status !== 'dropped')    return false;
+        if (state.libStatusFilter === 'ongoing'    && e.mode !== 'following')      return false;
+        if (state.libStatusFilter === 'cooking'    && e.mode !== 'cooking')        return false;
+        if (state.libStatusFilter === 'completed'  && e.status !== 'completed')    return false;
+        if (state.libStatusFilter === 'dropped'    && e.status !== 'dropped')      return false;
+        if (state.libStatusFilter === 'season_end' && e.status !== 'season_end')   return false;
       }
       return true;
     });
@@ -737,7 +763,23 @@
               const img = e.target.closest('img');
               if (!img) return;
               e.preventDefault(); e.stopPropagation();
-              const src = img.currentSrc || img.src || img.getAttribute('data-src') || '';
+              // Prefer the highest-res real src; fall back to lazy-load attrs
+              let src = img.currentSrc || img.src || '';
+              // currentSrc/src may be the placeholder (e.g. dflazy.jpg) on lazy-load sites
+              const isPlaceholder = !src || src.includes('dflazy') || src.includes('placeholder') ||
+                src.includes('lazy') || src.endsWith('/0') || src === window.location.href;
+              if (isPlaceholder || !src) {
+                // Try srcset first (highest resolution candidate)
+                const srcset = img.getAttribute('data-srcset') || img.getAttribute('srcset') || '';
+                if (srcset) {
+                  const candidates = srcset.split(',').map(s => s.trim().split(/\s+/)[0]).filter(Boolean);
+                  if (candidates.length) src = candidates[candidates.length - 1]; // largest
+                }
+                if (!src || isPlaceholder) {
+                  src = img.getAttribute('data-src') || img.getAttribute('data-original') ||
+                    img.getAttribute('data-lazy-src') || img.getAttribute('data-lazyload') || src;
+                }
+              }
               cleanup();
               chrome.runtime.sendMessage({ type: 'IMAGE_PICK_RESULT', cancelled: false, src });
             }
@@ -789,7 +831,19 @@
             showToast('Picked (URL only — cross-origin image)');
           }
         };
-        img.onerror = () => showToast('Could not load that image');
+        img.onerror = () => {
+          // CORS block — store URL directly (will render fine in same-origin context)
+          if (msg.src && msg.src.startsWith('http')) {
+            state.uploadedImageData = null;
+            setPreviewImage(msg.src);
+            srcPick?.classList.add('on');
+            srcAuto?.classList.remove('on');
+            srcUpload?.classList.remove('on');
+            showToast('Cover set (URL) ✓');
+          } else {
+            showToast('Could not load that image');
+          }
+        };
         img.src = msg.src;
       });
     }
@@ -808,9 +862,10 @@
     const vibes  = [...document.querySelectorAll('#vibe-pills .pill.on')].map(p => p.textContent.trim());
     const mode   = document.querySelector('#mode-pills .pill.on')?.textContent.trim().toLowerCase() || 'following';
     const statusRaw = document.querySelector('#status-pills .pill.on')?.textContent.trim().toLowerCase() || 'ongoing';
-    const status = statusRaw === 'hiatus' ? 'hiatus'
-      : statusRaw === 'dropped'  ? 'dropped'
-      : statusRaw === 'completed'? 'completed' : 'ongoing';
+    const status = statusRaw === 'hiatus'      ? 'hiatus'
+      : statusRaw === 'dropped'                ? 'dropped'
+      : statusRaw === 'completed'              ? 'completed'
+      : statusRaw === 'season end'             ? 'season_end' : 'ongoing';
     const releaseDays = [...document.querySelectorAll('#day-chips .dchip.on')].map(b => parseInt(b.dataset.day));
     const freq = parseInt(document.querySelector('#freq-chips .fchip.on')?.dataset.freq || '1');
     const sources = getSourcesFromForm();
@@ -914,9 +969,13 @@
     document.querySelectorAll('#mode-pills .pill').forEach(p =>
       p.classList.toggle('on', p.textContent.trim().toLowerCase() === (entry.mode || 'following'))
     );
-    document.querySelectorAll('#status-pills .pill').forEach(p =>
-      p.classList.toggle('on', p.textContent.trim().toLowerCase() === (entry.status || 'ongoing'))
-    );
+    document.querySelectorAll('#status-pills .pill').forEach(p => {
+      const pillText = p.textContent.trim().toLowerCase();
+      const entryStatus = (entry.status || 'ongoing');
+      const match = pillText === entryStatus ||
+        (pillText === 'season end' && entryStatus === 'season_end');
+      p.classList.toggle('on', match);
+    });
     document.querySelectorAll('#day-chips .dchip').forEach(b =>
       b.classList.toggle('on', (entry.releaseDays || []).includes(parseInt(b.dataset.day)))
     );
