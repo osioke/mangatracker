@@ -140,23 +140,23 @@
 
   function findMatch(pageInfo) {
     if (!pageInfo) return null;
-    const pageHost  = pageInfo.hostname || getHostname(pageInfo.url || '');
-    const pageNorm  = normaliseTitle(pageInfo.title);
+    const pageHost   = pageInfo.hostname || getHostname(pageInfo.url || '');
+    const pageNorm   = normaliseTitle(pageInfo.title);
+    const urlChapter = pageInfo.chapter || null;
+    if (!pageNorm) return null;
 
     for (const entry of state.entries) {
-      // Collect all hostnames for this entry
+      const entryNorm = normaliseTitle(entry.title);
+      // Entry title must be at least 6 chars and appear somewhere in the page title
+      if (!entryNorm || entryNorm.length < 6) continue;
+      if (!pageNorm.includes(entryNorm)) continue;
+
       const entryHosts = new Set();
       if (entry.hostname) entryHosts.add(entry.hostname);
-      (entry.sources || []).forEach(s => {
-        const h = getHostname(s.url);
-        if (h) entryHosts.add(h);
-      });
+      (entry.sources || []).forEach(s => { const h = getHostname(s.url); if (h) entryHosts.add(h); });
 
-      const sameHost  = pageHost && entryHosts.has(pageHost);
-      const titleMatch = pageNorm && pageNorm === normaliseTitle(entry.title);
-
-      if (sameHost && titleMatch) return { type: 'exact', entry };
-      if (!sameHost && titleMatch) return { type: 'newsource', entry };
+      const type = (pageHost && entryHosts.has(pageHost)) ? 'exact' : 'newsource';
+      return { type, entry, urlChapter };
     }
     return null;
   }
@@ -174,29 +174,45 @@
       ? `<img src="${escHtml(imgSrc)}" alt="" style="width:36px;height:49px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">`
       : `<div style="width:36px;height:49px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${{manhwa:'📖',manga:'📚',manhua:'📕',anime:'🎬',webtoon:'🌐'}[entry.type]||'📖'}</div>`;
 
+    const urlChapter = match.urlChapter || null;
+    // On a chapter page and we know which chapter, offer quick mark-read
+    const canMarkRead = isExact && urlChapter !== null && urlChapter > (entry.chapter || 0);
+
     el.className = `match-card${isExact ? '' : ' newsource'}`;
     el.innerHTML = `
       <div class="match-banner">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        ${isExact ? 'Already in your library' : 'Found in library — different site'}
+        ${isExact ? 'In your library' : 'Found in library — different site'}
       </div>
       <div class="match-entry">
         ${artEl}
         <div class="match-info">
           <div class="match-title">${escHtml(entry.title)}</div>
-          <div class="match-meta">${escHtml(entry.hostname || '')} · ${chLabel(entry)} ${entry.chapter || 0} · ${escHtml(entry.status || 'ongoing')}</div>
+          <div class="match-meta">${escHtml(entry.hostname || '')} · ${chLabel(entry)} ${entry.chapter || 0}${canMarkRead ? ` → <strong style="color:var(--acc2)">${urlChapter}</strong>` : ''} · ${escHtml(entry.status || 'ongoing')}</div>
         </div>
       </div>
       <div class="match-actions">
         ${isExact
-          ? `<button class="match-btn primary" id="match-edit-btn">Edit this entry</button>
-             <button class="match-btn" id="match-ignore-btn">Add as new anyway</button>`
+          ? `${canMarkRead ? `<button class="match-btn primary" id="match-markread-btn">Mark ${chLabel(entry)} ${urlChapter} read</button>` : ''}
+             <button class="match-btn${canMarkRead ? '' : ' primary'}" id="match-edit-btn">Edit entry</button>
+             <button class="match-btn" id="match-ignore-btn">Add as new</button>`
           : `<button class="match-btn green" id="match-addsrc-btn">Add as new source</button>
              <button class="match-btn" id="match-ignore-btn">Add as new anyway</button>`
         }
       </div>`;
 
     el.style.display = '';
+
+    $('match-markread-btn')?.addEventListener('click', async () => {
+      entry.chapter  = urlChapter;
+      entry.lastRead = Date.now();
+      await Storage.saveEntry(entry);
+      state.entries = await Storage.getEntries();
+      showToast(`${chLabel(entry)} ${urlChapter} marked read ✓`);
+      if (state.syncUser) Sync.scheduleAutoPush();
+      el.style.display = 'none';
+      renderMatchCard(null);
+    });
 
     $('match-edit-btn')?.addEventListener('click', () => {
       el.style.display = 'none';
@@ -825,10 +841,16 @@
             srcUpload?.classList.remove('on');
             showToast('Cover art picked ✓');
           } catch {
-            // CORS-tainted canvas — store URL directly as fallback
+            // CORS-tainted canvas — store URL; saveEntry will retry encoding at save time
             state.uploadedImageData = null;
             setPreviewImage(msg.src);
-            showToast('Picked (URL only — cross-origin image)');
+            // Stash the URL in pageInfo so saveEntry's fetchImageAsDataUrl can pick it up
+            if (!state.pageInfo) state.pageInfo = {};
+            state.pageInfo.image = msg.src;
+            srcPick?.classList.add('on');
+            srcAuto?.classList.remove('on');
+            srcUpload?.classList.remove('on');
+            showToast('Picked ✓ (will encode on save)');
           }
         };
         img.onerror = () => {
@@ -884,9 +906,46 @@
     };
   }
 
+  // Fetch a URL and encode it as a base64 data-URL via canvas.
+  // Falls back to the raw URL if the fetch fails (e.g. CORS, offline).
+  async function fetchImageAsDataUrl(url) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const scale  = Math.min(1, 400 / img.naturalWidth);
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.round(img.naturalWidth  * scale);
+          canvas.height = Math.round(img.naturalHeight * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        } catch {
+          // CORS-tainted or other canvas error — return raw URL as fallback
+          resolve(url);
+        }
+      };
+      img.onerror = () => resolve(url); // network error — keep URL
+      img.src = url;
+    });
+  }
+
   async function saveEntry() {
     const data = getFormData();
     if (!data.title) { showToast('Enter a title first'); return; }
+
+    // If no locally-encoded imageData but we have a URL image (auto mode),
+    // try to download and base64-encode it so it's available offline.
+    if (!data.imageData && data.image) {
+      const encoded = await fetchImageAsDataUrl(data.image);
+      // If we got a real data-URL (not the fallback URL), store it
+      if (encoded && encoded.startsWith('data:')) {
+        data.imageData = encoded;
+        data.image = ''; // don't double-store
+      }
+      // If encoding failed, keep data.image as the URL fallback
+    }
+
     const existing = state.editId ? state.entries.find(e => e.id === state.editId) : {};
     const entry = {
       ...(existing || {}),
@@ -913,9 +972,9 @@
     if ($('f-notes'))   $('f-notes').value   = '';
     document.querySelectorAll('#trope-pills .pill.on, #vibe-pills .pill.on').forEach(p => p.classList.remove('on'));
     document.querySelectorAll('#day-chips .dchip.on').forEach(p => p.classList.remove('on'));
-    document.querySelector('#mode-pills .pill')?.classList.add('on');
-    document.querySelector('#status-pills .pill')?.classList.add('on');
-    document.querySelector('#freq-chips .fchip')?.classList.add('on');
+    document.querySelectorAll('#mode-pills .pill').forEach((p, i) => p.classList.toggle('on', i === 0));
+    document.querySelectorAll('#status-pills .pill').forEach((p, i) => p.classList.toggle('on', i === 0));
+    document.querySelectorAll('#freq-chips .fchip').forEach((b, i) => b.classList.toggle('on', i === 0));
     clearPreviewImage();
     state.pageInfo = null;
     state.uploadedImageData = null;
