@@ -1,5 +1,3 @@
-The extension sometimes doesn't know the manhwa in the page when it is opened, is one it has saved, especially if it is opened to the chapter. The name or part of it would still be in the page title, so can't that be used and then the modal/box that shows can also have the mark read option too, because it is on the chapter page one is most likely to mark as read.
+The entries should have the option to add alternate names alonside the additional sources, as some sites use different names, so the app can still know to check and track
 
-Somehow the schedule selector that has 1x by default doesn't mark or select for some enstry, not sure why yet. We have the 1x selected by defaukt, without clicking anything it should be 1x for the schedule. 
-
-It seems the auto option (and maybe the pick option as well) for images doesn't download or keep the image for the entry it gets, and so if there is no internet connection, the image doesn't load. This shouldn't be, can this be fixed so the image and evert=ything of the saved entry exists on the app/database regardless of where it is being accessed or with or without internet.
+IF no day is selected when daving the entry, the current day should be used as default so a schedule is set.
