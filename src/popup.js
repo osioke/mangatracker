@@ -22,6 +22,7 @@
     pageInfo: null,
     editId: null,
     selectedDay: new Date().getDay(),
+    selectedDate: new Date(),
     libSearch: '',
     libTypeFilter: '',
     libStatusFilter: '',
@@ -69,7 +70,15 @@
 
   function chLabel(entry) { return entry.type === 'anime' ? 'ep.' : 'ch.'; }
 
+  function ordinal(n) {
+    const s = ['th','st','nd','rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+  }
+
   function releaseSummary(entry) {
+    if (entry.releaseType === 'monthly') {
+      return entry.releaseDayOfMonth ? `Monthly · ${ordinal(entry.releaseDayOfMonth)}` : 'schedule unknown';
+    }
     if (!entry.releaseDays || !entry.releaseDays.length) return 'schedule unknown';
     const days = entry.releaseDays.map(d => DAYS[d]).join(', ');
     const freq  = (entry.releaseFreq || 1) > 1 ? `${entry.releaseFreq}×/wk · ` : '';
@@ -77,6 +86,22 @@
   }
 
   function nextReleaseLabel(entry) {
+    if (entry.releaseType === 'monthly') {
+      if (!entry.releaseDayOfMonth) return 'unknown';
+      const now = new Date();
+      // Walk forward day-by-day (max 31) until isReleaseOnDate matches —
+      // simplest way to respect month-length clamping without duplicating it.
+      for (let i = 0; i <= 31; i++) {
+        const d = new Date(now);
+        d.setDate(now.getDate() + i);
+        if (Schedule.isReleaseOnDate(entry, d)) {
+          if (i === 0) return 'today';
+          if (i === 1) return 'tomorrow';
+          return `${DAYS[d.getDay()]} ${d.getDate()}`;
+        }
+      }
+      return 'unknown';
+    }
     if (!entry.releaseDays || !entry.releaseDays.length) return 'unknown';
     const today = new Date().getDay();
     const sorted = [...entry.releaseDays].sort((a, b) => {
@@ -133,6 +158,36 @@
     })).filter(s => s.url);
   }
 
+  // ── Alternate names ────────────────────────────────────────────────────────
+  // Some sites list the same series under a different title. Alternate names
+  // let match detection (findMatch) recognise the series everywhere, so
+  // reading progress stays unified across sources even when the titles differ.
+  function buildAltNameRow(value = '') {
+    const row = document.createElement('div');
+    row.className = 'source-row';
+    row.innerHTML = `
+      <input class="finput" type="text" placeholder="Alternate title…" value="${escHtml(value)}">
+      <button class="source-remove" title="Remove">✕</button>
+    `;
+    row.querySelector('.source-remove').addEventListener('click', () => row.remove());
+    return row;
+  }
+
+  function renderAltNames(names) {
+    const list = $('altnames-list');
+    if (!list) return;
+    list.innerHTML = '';
+    (names || []).forEach(n => list.appendChild(buildAltNameRow(n)));
+  }
+
+  function getAltNamesFromForm() {
+    const list = $('altnames-list');
+    if (!list) return [];
+    return [...list.querySelectorAll('.source-row input')]
+      .map(inp => inp.value.trim())
+      .filter(Boolean);
+  }
+
   // ── Duplicate / match detection ────────────────────────────────────────────
   function normaliseTitle(t) {
     return (t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -146,10 +201,16 @@
     if (!pageNorm) return null;
 
     for (const entry of state.entries) {
-      const entryNorm = normaliseTitle(entry.title);
-      // Entry title must be at least 6 chars and appear somewhere in the page title
-      if (!entryNorm || entryNorm.length < 6) continue;
-      if (!pageNorm.includes(entryNorm)) continue;
+      // Check the entry's primary title AND any alternate names — the same
+      // series is often listed under a different title on different sites
+      // (e.g. "Disastrous Necromancer" vs "Catastrophic Necromancer").
+      const candidates = [entry.title, ...(entry.altNames || [])];
+      const hasMatch = candidates.some(name => {
+        const norm = normaliseTitle(name);
+        // Candidate name must be at least 6 chars and appear somewhere in the page title
+        return norm && norm.length >= 6 && pageNorm.includes(norm);
+      });
+      if (!hasMatch) continue;
 
       const entryHosts = new Set();
       if (entry.hostname) entryHosts.add(entry.hostname);
@@ -304,17 +365,16 @@
       const d = new Date(today);
       d.setDate(today.getDate() + i);
       const dayIdx = d.getDay();
-      const hasRel = state.entries.some(e =>
-        e.releaseDays && e.releaseDays.includes(dayIdx) && e.status !== 'dropped'
-      );
+      const hasRel = state.entries.some(e => Schedule.isReleaseOnDate(e, d));
       const btn = document.createElement('button');
       btn.className = 'daypill' + (i < 0 ? ' past' : '') + (hasRel ? ' hasrel' : '');
       btn.textContent = `${DAYS[dayIdx]} ${d.getDate()}`;
-      if (i === 0) { btn.classList.add('active'); state.selectedDay = dayIdx; }
+      if (i === 0) { btn.classList.add('active'); state.selectedDay = dayIdx; state.selectedDate = d; }
       btn.addEventListener('click', () => {
         strip.querySelectorAll('.daypill').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         state.selectedDay = dayIdx;
+        state.selectedDate = d;
         renderTodayContent();
       });
       strip.appendChild(btn);
@@ -324,9 +384,9 @@
   function renderTodayContent() {
     const c = $('today-content');
     if (!c) return;
-    const { settings, entries, selectedDay } = state;
+    const { settings, entries, selectedDate } = state;
     const todayReleases = entries.filter(e =>
-      e.releaseDays && e.releaseDays.includes(selectedDay) &&
+      Schedule.isReleaseOnDate(e, selectedDate) &&
       e.status !== 'dropped' && e.status !== 'season_end'
     );
     const cookReady = entries.filter(e =>
@@ -336,7 +396,7 @@
     const upToDate = settings.showUpToDate !== false
       ? entries.filter(e => {
           if (e.status === 'dropped' || e.mode === 'cooking') return false;
-          return !(e.releaseDays && e.releaseDays.includes(selectedDay));
+          return !Schedule.isReleaseOnDate(e, selectedDate);
         })
       : [];
 
@@ -888,17 +948,28 @@
       : statusRaw === 'dropped'                ? 'dropped'
       : statusRaw === 'completed'              ? 'completed'
       : statusRaw === 'season end'             ? 'season_end' : 'ongoing';
-    const releaseDays = [...document.querySelectorAll('#day-chips .dchip.on')].map(b => parseInt(b.dataset.day));
-    const freq = parseInt(document.querySelector('#freq-chips .fchip.on')?.dataset.freq || '1');
+    const releaseType = document.querySelector('#schedtype-pills .pill.on')?.dataset.schedtype || 'weekly';
+    let releaseDays = [], freq = 1, releaseDayOfMonth = null;
+    if (releaseType === 'monthly') {
+      releaseDayOfMonth = Math.min(Math.max(parseInt($('f-day-of-month')?.value || '1') || 1, 1), 31);
+    } else {
+      releaseDays = [...document.querySelectorAll('#day-chips .dchip.on')].map(b => parseInt(b.dataset.day));
+      freq = parseInt(document.querySelector('#freq-chips .fchip.on')?.dataset.freq || '1');
+      // If no day is picked, default to today so the entry always ends up
+      // with an actual schedule instead of "schedule unknown".
+      if (!releaseDays.length) releaseDays = [new Date().getDay()];
+    }
     const sources = getSourcesFromForm();
+    const altNames = getAltNamesFromForm();
     const primarySource = sources.find(s => s.primary) || sources[0];
     return {
       title: $('f-title')?.value.trim() || '',
       type:  $('f-type')?.value || 'manhwa',
       chapter: parseInt($('f-chapter')?.value || '0'),
-      tropes, vibes, mode, status, releaseDays, releaseFreq: freq,
+      tropes, vibes, mode, status,
+      releaseType, releaseDays, releaseFreq: freq, releaseDayOfMonth,
       notes: $('f-notes')?.value.trim() || '',
-      sources,
+      sources, altNames,
       url: primarySource?.url || state.pageInfo?.url || '',
       hostname: primarySource ? getHostname(primarySource.url) : (state.pageInfo?.hostname || ''),
       image: (!state.uploadedImageData && state.pageInfo?.image) ? state.pageInfo.image : '',
@@ -954,16 +1025,37 @@
       savedAt: Date.now(),
       lastRead: existing?.lastRead || Date.now(),
     };
-    await Storage.saveEntry(entry);
-    if (entry.hostname) await Storage.saveSite({ hostname: entry.hostname, addedAt: Date.now() });
-    state.entries = await Storage.getEntries();
-    state.sites   = await Storage.getSites();
-    showToast(state.editId ? 'Updated' : 'Saved to library');
-    // ── Auto-push to cloud whenever signed in ────────────────────────────────
-    if (state.syncUser) Sync.scheduleAutoPush();
-    state.editId = null;
-    resetAddForm();
-    switchNav('library');
+
+    const btn = $('save-btn');
+    const originalBtnText = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+    // Storage.saveEntry() now throws if the underlying chrome.storage.local
+    // write actually failed (see storage.js) instead of silently reporting
+    // success — most commonly this happens when accumulated cover-art images
+    // push local storage over its quota. We rely on that here: only show
+    // "Saved to library" / reset the form / navigate away once the write is
+    // genuinely confirmed, so a failed save never masquerades as a success
+    // and the user never loses what they typed.
+    try {
+      await Storage.saveEntry(entry);
+      if (entry.hostname) await Storage.saveSite({ hostname: entry.hostname, addedAt: Date.now() });
+      state.entries = await Storage.getEntries();
+      state.sites   = await Storage.getSites();
+      showToast(state.editId ? 'Updated' : 'Saved to library');
+      // ── Auto-push to cloud whenever signed in ──────────────────────────────
+      if (state.syncUser) Sync.scheduleAutoPush();
+      state.editId = null;
+      resetAddForm();
+      switchNav('library');
+    } catch (e) {
+      console.error('[MangaTracker] saveEntry failed:', e);
+      showToast(e.message || 'Save failed — please try again', 5000);
+      // Deliberately NOT resetting the form or navigating away here — the
+      // user's input is preserved so they don't lose it after a failed save.
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = originalBtnText || 'Save to library'; }
+    }
   }
 
   function resetAddForm() {
@@ -975,6 +1067,11 @@
     document.querySelectorAll('#mode-pills .pill').forEach((p, i) => p.classList.toggle('on', i === 0));
     document.querySelectorAll('#status-pills .pill').forEach((p, i) => p.classList.toggle('on', i === 0));
     document.querySelectorAll('#freq-chips .fchip').forEach((b, i) => b.classList.toggle('on', i === 0));
+    document.querySelectorAll('#schedtype-pills .pill').forEach((p, i) => p.classList.toggle('on', i === 0));
+    if ($('weekly-schedule'))  $('weekly-schedule').style.display  = '';
+    if ($('monthly-schedule')) $('monthly-schedule').style.display = 'none';
+    if ($('f-day-of-month'))   $('f-day-of-month').value = '1';
+    if ($('altnames-list'))    $('altnames-list').innerHTML = '';
     clearPreviewImage();
     state.pageInfo = null;
     state.uploadedImageData = null;
@@ -1009,6 +1106,7 @@
       ? entry.sources
       : (entry.url ? [{ url: entry.url, primary: true }] : []);
     renderSources(existingSources);
+    renderAltNames(entry.altNames || []);
 
     const imgSrc = entry.imageData || entry.image || '';
     if (imgSrc) setPreviewImage(imgSrc);
@@ -1042,6 +1140,13 @@
     document.querySelectorAll('#freq-chips .fchip').forEach(b =>
       b.classList.toggle('on', parseInt(b.dataset.freq) === freq)
     );
+    const isMonthly = entry.releaseType === 'monthly';
+    document.querySelectorAll('#schedtype-pills .pill').forEach(p =>
+      p.classList.toggle('on', p.dataset.schedtype === (isMonthly ? 'monthly' : 'weekly'))
+    );
+    if ($('weekly-schedule'))  $('weekly-schedule').style.display  = isMonthly ? 'none' : '';
+    if ($('monthly-schedule')) $('monthly-schedule').style.display = isMonthly ? '' : 'none';
+    if ($('f-day-of-month'))   $('f-day-of-month').value = entry.releaseDayOfMonth || 1;
     if ($('save-btn')) $('save-btn').textContent = 'Update entry';
   }
 
@@ -1378,6 +1483,16 @@
     document.querySelectorAll('#day-chips .dchip').forEach(btn =>
       btn.addEventListener('click', () => btn.classList.toggle('on'))
     );
+    // Weekly vs monthly schedule toggle
+    document.querySelectorAll('#schedtype-pills .pill').forEach(btn =>
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#schedtype-pills .pill').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        const isMonthly = btn.dataset.schedtype === 'monthly';
+        if ($('weekly-schedule'))  $('weekly-schedule').style.display  = isMonthly ? 'none' : '';
+        if ($('monthly-schedule')) $('monthly-schedule').style.display = isMonthly ? '' : 'none';
+      })
+    );
     // Edit flags — prevent auto-detection from overwriting manual input
     $('f-title')?.addEventListener('input',   () => { $('f-title').dataset.edited   = '1'; });
     $('f-chapter')?.addEventListener('input', () => { $('f-chapter').dataset.edited = '1'; });
@@ -1405,6 +1520,12 @@
       const list = $('sources-list');
       const hasAny = list.querySelectorAll('.source-row').length > 0;
       list.appendChild(buildSourceRow('', !hasAny));
+      list.querySelector('.source-row:last-child input')?.focus();
+    });
+    // Alternate names
+    $('altnames-add-btn')?.addEventListener('click', () => {
+      const list = $('altnames-list');
+      list.appendChild(buildAltNameRow(''));
       list.querySelector('.source-row:last-child input')?.focus();
     });
     // Sync

@@ -2,10 +2,38 @@ const Schedule = (() => {
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+  // Clamp a target day-of-month to the actual length of the given month, so
+  // "the 31st" still fires on Feb 28/29, Apr 30, etc. instead of never.
+  function lastDayOfMonth(date) {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  }
+
+  // Does this entry release on this specific calendar date?
+  // Weekly entries (default): true if the date's weekday is in releaseDays.
+  // Monthly entries: true if the date's day-of-month matches releaseDayOfMonth
+  // (clamped to the month's real length).
+  function isReleaseOnDate(entry, date) {
+    if (!entry || entry.status === 'dropped') return false;
+    if (entry.releaseType === 'monthly') {
+      if (!entry.releaseDayOfMonth) return false;
+      const target = Math.min(entry.releaseDayOfMonth, lastDayOfMonth(date));
+      return date.getDate() === target;
+    }
+    return !!(entry.releaseDays && entry.releaseDays.includes(date.getDay()));
+  }
+
+  function getReleasesOnDate(entries, date) {
+    return entries.filter(e => isReleaseOnDate(e, date));
+  }
+
+  // Back-compat helper for weekly-only lookups by weekday index (0-6).
+  // Prefer getReleasesOnDate()/isReleaseOnDate() where an actual date is
+  // available, since weekday-only lookups can't represent monthly entries.
   function getReleasesOnDay(entries, dayIndex) {
     return entries.filter(e => {
       if (!e.releaseDays || e.releaseDays.length === 0) return false;
       if (e.status === 'dropped') return false;
+      if (e.releaseType === 'monthly') return false;
       return e.releaseDays.includes(dayIndex);
     });
   }
@@ -27,7 +55,7 @@ const Schedule = (() => {
       const d = new Date(base);
       d.setDate(base.getDate() + i);
       const dayIdx = d.getDay();
-      const releases = getReleasesOnDay(entries, dayIdx);
+      const releases = getReleasesOnDate(entries, d);
       days.push({
         date: d,
         dayIdx,
@@ -43,16 +71,16 @@ const Schedule = (() => {
     return days;
   }
 
-  function groupByStatus(entries, todayDayIdx, cookThreshold) {
-    const todayReleases = getReleasesOnDay(entries, todayDayIdx);
+  function groupByStatus(entries, todayDayIdx, cookThreshold, todayDate) {
+    const today = todayDate || new Date();
+    const todayReleases = todayDate ? getReleasesOnDate(entries, today) : getReleasesOnDay(entries, todayDayIdx);
     const cookingReady = getCookingReady(entries, cookThreshold);
     const upToDate = entries.filter(e => {
       if (e.status === 'dropped' || e.mode === 'cooking') return false;
-      const hasRelease = e.releaseDays && e.releaseDays.includes(todayDayIdx);
-      return !hasRelease;
+      return !isReleaseOnDate(e, today);
     });
     return { todayReleases, cookingReady, upToDate };
   }
 
-  return { getWeekData, groupByStatus, DAYS, DAYS_FULL };
+  return { getWeekData, groupByStatus, getReleasesOnDate, getReleasesOnDay, isReleaseOnDate, DAYS, DAYS_FULL };
 })();

@@ -199,16 +199,41 @@
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'GET_PAGE_INFO') {
-      sendResponse(getPageInfo());
+      // getPageInfo() touches a lot of page DOM (genre detectors, meta tags,
+      // regexes on the title) — if any of that throws on an unusual page,
+      // sendResponse() would never fire even though we still return true
+      // below, which is exactly what produces the "message channel closed
+      // before a response was received" console error. Guard it so the
+      // popup always gets *something* back.
+      try {
+        sendResponse(getPageInfo());
+      } catch (e) {
+        console.error('[MangaTracker] getPageInfo failed:', e);
+        sendResponse({
+          title: document.title || '',
+          image: '',
+          url: location.href,
+          hostname: location.hostname.replace(/^www\./, ''),
+          genres: [],
+          chapter: null,
+        });
+      }
+      return true;
     }
     if (msg.type === 'START_IMAGE_PICK') {
       startImagePicker();
       sendResponse({ ok: true });
+      return true;
     }
     if (msg.type === 'CANCEL_IMAGE_PICK') {
       stopImagePicker(true);
       sendResponse({ ok: true });
+      return true;
     }
-    return true;
+    // Unrecognised message type — nothing will call sendResponse, so don't
+    // promise an async response. Returning true unconditionally here (as the
+    // old code did) is what caused "message channel closed" errors for any
+    // message this listener wasn't actually handling.
+    return false;
   });
 })();
