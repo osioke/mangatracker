@@ -12,6 +12,13 @@ const Schedule = (() => {
   // Weekly entries (default): true if the date's weekday is in releaseDays.
   // Monthly entries: true if the date's day-of-month matches releaseDayOfMonth
   // (clamped to the month's real length).
+  // An entry is "irregular" when the weekly Irregular chip was chosen — it
+  // deliberately has no fixed release day, as opposed to a weekly entry that
+  // simply has releaseDays populated (1×/2×/3×/wk) or a monthly entry.
+  function isIrregular(entry) {
+    return !!entry && entry.releaseType !== 'monthly' && entry.releaseFreq === 0;
+  }
+
   function isReleaseOnDate(entry, date) {
     if (!entry || entry.status === 'dropped') return false;
     if (entry.releaseType === 'monthly') {
@@ -82,5 +89,5 @@ const Schedule = (() => {
     return { todayReleases, cookingReady, upToDate };
   }
 
-  return { getWeekData, groupByStatus, getReleasesOnDate, getReleasesOnDay, isReleaseOnDate, DAYS, DAYS_FULL };
+  return { getWeekData, groupByStatus, getReleasesOnDate, getReleasesOnDay, isReleaseOnDate, isIrregular, DAYS, DAYS_FULL };
 })();

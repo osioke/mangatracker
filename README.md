@@ -1,19 +1,19 @@
 # MangaTracker
 
 Track your manhwa, manga, manhua and anime across any reading site.
-Access your library from the browser extension or the web app on your phone.
+Access your library from the browser extension or the web app.
 
 ---
 
 ## Firebase setup (required for sync)
 
-You need a free Firebase project. Takes about 5 minutes.
+You need a free Firebase project. This takes about 5 minutes.
 
 1. Go to https://console.firebase.google.com
-2. Click **Add project** → give it a name → Continue
+2. Click **Add project** → give it any name → Continue through the steps
 3. Once created, click the **Web** icon (`</>`) → give it a nickname → **Register app**
-4. Copy the **apiKey** and **projectId** from the config block shown
-5. Go to **Firestore Database** → **Create database** → **Start in production mode** → pick any region
+4. You'll see a `firebaseConfig` block — copy the **apiKey** and **projectId** values
+5. Go to **Firestore Database** → **Create database** → **Start in test mode** → pick any region
 6. Go to **Authentication** → **Get started** → **Sign-in method** → enable **Anonymous** → Save
 7. Go to **Firestore Database** → **Rules** tab → paste the rules below → **Publish**
 
@@ -30,7 +30,9 @@ service cloud.firestore {
 }
 ```
 
-### Paste your keys into two files
+These rules let any signed-in (including anonymous) client read or write any document as long as it knows the document's key — that's what makes the email-only sign-in below possible, and also why it isn't a real password.
+
+Now paste your values into two places:
 
 **`mangatracker/src/firebase.js`** — near the top:
 ```js
@@ -49,11 +51,10 @@ const FB_PROJECT = 'YOUR_PROJECT_ID';
 ## Extension installation
 
 ### Chrome / Brave / Edge
-1. Go to `chrome://extensions`
+1. Go to `chrome://extensions` (or `brave://extensions`)
 2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked** → select the `mangatracker/` folder
 4. Pin the icon from the toolbar puzzle-piece menu
-5. After any file update, click the **reload** icon on the extension card
 
 ### Firefox
 1. Rename `manifest.json` → `manifest.chrome.json`
@@ -69,42 +70,32 @@ const FB_PROJECT = 'YOUR_PROJECT_ID';
 3. Go to repo **Settings** → **Pages** → Source: **Deploy from a branch** → `main` / `root`
 4. Your web app is live at `https://YOUR_USERNAME.github.io/YOUR_REPO_NAME`
 
+Open this URL on your phone to access your library anywhere.
+
 ---
 
 ## How sync works
 
-- Data lives in Firestore under a key derived from `SHA-256(username:phrasekey)`
-- No email or account needed — just a username and a phrase you remember
-- Same username + phrase on any device = same library
-- The extension auto-pushes to the cloud 1.5 seconds after any change when signed in
-- The web app can also read and write — add, edit, mark chapters, and delete from your phone
+- Sign in with just an **email** — there's no password. Your data is stored in Firestore under a key derived from `SHA-256(your email)`.
+- ⚠️ **Security note:** because there's no password, anyone who knows your email can access and edit this library — the Firestore rules below allow any authenticated (anonymous) client to read/write any document once it knows the key. That's a deliberate trade-off for a low-stakes reading list, not an oversight. If you want real protection here, consider adding a PIN/passphrase on top of the email, or switching to Firebase's email-link sign-in.
+- Same email on any device = same library
+- The extension **auto-pushes** to the cloud ~1.5 seconds after any change while signed in, and also has manual **Push**/**Pull** buttons in Settings → Sync
+- The web app loads fresh from the cloud on every sign-in and can push its own changes back
 
 ---
 
-## How to use
+## What's new in this version
 
-### Extension
-- Opens directly to **Add entry** on every click
-- Page title, cover art, and genres are auto-detected from the current tab
-- Cover art: **Auto** uses the page's og:image, **Upload** lets you pick a file, **Pick** lets you click any image on the page directly, **Clear** removes it
-- Sign in via **Settings → Sync** using a username and phrase-key
-- Once signed in, all changes push to the cloud automatically
-
-### Web app
-- Open your GitHub Pages URL on any device
-- Sign in with the same username and phrase-key as the extension
-- Full read/write access — add, edit, mark chapters read, delete entries
-
----
-
-## Cover art picker
-
-1. Open the extension on a manga/manhwa page
-2. Click **Pick** in the cover art row
-3. A banner appears on the page: *"MangaTracker: click any image to use as cover art · Esc to cancel"*
-4. Hover over any image — a purple outline shows which image is targeted
-5. Click the image to use it, or press Esc to cancel
-6. Reopen the extension — the selected image is now set as cover art
+- **Alternate names**: entries can track alternate titles used by different sites, so match detection recognises the same series everywhere
+- **Monthly schedules**: releases can be set to a specific day-of-month instead of weekly days
+- **Irregular schedule**: marking a series Irregular hides the day picker entirely and lists it in its own "Irregular" section instead of a fake weekly slot
+- **Default release day**: saving without picking a day now defaults to today, so every (non-Irregular) entry ends up with a schedule
+- **Email-only sign-in**: no more username + phrase-key — see the security note above
+- **Sidebar**: Add entry is now at the bottom, separated from the main nav
+- **Genre detection**: extension auto-detects genres from the page you're on
+- **Custom genres & vibes**: type any tag and press Enter — it saves for next time
+- **Cover art upload**: click the thumbnail to upload your own image
+- **Web app**: full library viewer at your GitHub Pages URL, works on phone
 
 ---
 
@@ -117,9 +108,9 @@ mangatracker/               Browser extension
 ├── popup.html
 ├── icons/
 └── src/
-    ├── background.js       Message relay for image picker
-    ├── content.js          Page info, genre detector, image picker
-    ├── storage.js          Local storage helpers
+    ├── background.js
+    ├── content.js          Page info + genre detector
+    ├── storage.js          Local storage
     ├── schedule.js         Release schedule logic
     ├── firebase.js         Cloud sync — add your keys here
     └── popup.js            All UI logic
@@ -132,6 +123,7 @@ mangatracker-web/           Web app (GitHub Pages)
 
 ## Privacy
 
-All data is stored locally via `chrome.storage.local`.
-Cloud sync only happens when you are signed in — changes push automatically 1.5 seconds after each edit.
+All data is stored locally via `chrome.storage.local` (with the `unlimitedStorage` permission, so accumulated cover-art images won't silently hit a storage quota and fail to save).
+Cloud sync happens automatically ~1.5s after each change while signed in, plus on-demand via the Push/Pull buttons.
+The web app reads from and writes to Firestore when signed in.
 No analytics, no tracking, no ads.

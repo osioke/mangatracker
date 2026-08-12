@@ -15,7 +15,7 @@ const Sync = (() => {
 
   let _idToken  = null;
   let _uid      = null;
-  let _username = null;
+  let _email    = null;
 
   // ── Auto-push debounce ────────────────────────────────────────────────────
   // Waits 1.5 seconds after the last change before pushing, so rapid edits
@@ -69,12 +69,22 @@ const Sync = (() => {
     return data;
   }
 
-  // ── Hash a passphrase into a consistent document key ─────────────────────
-  async function makeDocKey(username, phrasekey) {
-    const raw = `${username.toLowerCase().trim()}:${phrasekey.trim()}`;
+  // ── Derive a document key from just an email ──────────────────────────────
+  // NOTE ON SECURITY: there is no password here. Anyone who knows this email
+  // address can sign in as "you" and read/write this library — the Firestore
+  // rules (see README) allow any authenticated user to access any document
+  // once they know its key, and this key is now a direct hash of a
+  // often-guessable/public identifier rather than a private phrase. That's a
+  // deliberate trade-off for a low-stakes reading list, not an oversight.
+  async function makeDocKey(email) {
+    const raw = email.toLowerCase().trim();
     const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
     const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
     return hex.slice(0, 32);
+  }
+
+  function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
   // ── Firestore REST helpers ────────────────────────────────────────────────
@@ -111,38 +121,39 @@ const Sync = (() => {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  async function login(username, phrasekey) {
+  async function login(email) {
     if (!isConfigured()) throw new Error('Firebase not configured. See src/firebase.js.');
+    if (!email || !isValidEmail(email)) throw new Error('Enter a valid email address.');
     await signInAnonymously();
-    const docKey  = await makeDocKey(username, phrasekey);
-    _username     = username.toLowerCase().trim();
+    const docKey = await makeDocKey(email);
+    _email       = email.toLowerCase().trim();
     await new Promise(resolve => chrome.storage.local.set({
-      mt_sync_dockey:   docKey,
-      mt_sync_username: _username,
+      mt_sync_dockey: docKey,
+      mt_sync_email:  _email,
     }, resolve));
-    return { username: _username, docKey };
+    return { email: _email, docKey };
   }
 
   async function restoreSession() {
     if (!isConfigured()) return false;
     const data = await new Promise(resolve =>
-      chrome.storage.local.get(['mt_sync_dockey','mt_sync_username'], resolve)
+      chrome.storage.local.get(['mt_sync_dockey','mt_sync_email'], resolve)
     );
     if (!data.mt_sync_dockey) return false;
     try {
       await signInAnonymously();
-      _username = data.mt_sync_username;
-      return { username: _username, docKey: data.mt_sync_dockey };
+      _email = data.mt_sync_email;
+      return { email: _email, docKey: data.mt_sync_dockey };
     } catch {
       return false;
     }
   }
 
   async function logout() {
-    _idToken = null; _uid = null; _username = null;
+    _idToken = null; _uid = null; _email = null;
     clearTimeout(_autoPushTimer);
     await new Promise(resolve =>
-      chrome.storage.local.remove(['mt_sync_dockey','mt_sync_username'], resolve)
+      chrome.storage.local.remove(['mt_sync_dockey','mt_sync_email'], resolve)
     );
   }
 
@@ -157,7 +168,7 @@ const Sync = (() => {
       entries,
       settings,
       pushedAt: Date.now(),
-      username: _username
+      email: _email
     });
   }
 
@@ -171,8 +182,8 @@ const Sync = (() => {
     return remote; // { entries, settings, pushedAt }
   }
 
-  function getUsername()    { return _username; }
+  function getEmail()       { return _email; }
   function configured()     { return isConfigured(); }
 
-  return { login, logout, restoreSession, push, pull, getUsername, configured, scheduleAutoPush };
+  return { login, logout, restoreSession, push, pull, getEmail, configured, scheduleAutoPush };
 })();

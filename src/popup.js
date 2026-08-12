@@ -79,9 +79,10 @@
     if (entry.releaseType === 'monthly') {
       return entry.releaseDayOfMonth ? `Monthly · ${ordinal(entry.releaseDayOfMonth)}` : 'schedule unknown';
     }
+    if (Schedule.isIrregular(entry)) return 'Irregular';
     if (!entry.releaseDays || !entry.releaseDays.length) return 'schedule unknown';
     const days = entry.releaseDays.map(d => DAYS[d]).join(', ');
-    const freq  = (entry.releaseFreq || 1) > 1 ? `${entry.releaseFreq}×/wk · ` : '';
+    const freq  = (entry.releaseFreq ?? 1) > 1 ? `${entry.releaseFreq}×/wk · ` : '';
     return `${freq}${days}`;
   }
 
@@ -102,6 +103,7 @@
       }
       return 'unknown';
     }
+    if (Schedule.isIrregular(entry)) return 'irregular';
     if (!entry.releaseDays || !entry.releaseDays.length) return 'unknown';
     const today = new Date().getDay();
     const sorted = [...entry.releaseDays].sort((a, b) => {
@@ -393,15 +395,19 @@
       e.mode === 'cooking' && e.status !== 'dropped' &&
       ((e.latestChapter || 0) - (e.chapter || 0)) >= (settings.cookThreshold || 10)
     );
+    const irregular = entries.filter(e =>
+      Schedule.isIrregular(e) && e.mode !== 'cooking' &&
+      e.status !== 'dropped' && e.status !== 'season_end'
+    );
     const upToDate = settings.showUpToDate !== false
       ? entries.filter(e => {
-          if (e.status === 'dropped' || e.mode === 'cooking') return false;
+          if (e.status === 'dropped' || e.mode === 'cooking' || Schedule.isIrregular(e)) return false;
           return !Schedule.isReleaseOnDate(e, selectedDate);
         })
       : [];
 
     let html = '';
-    if (!todayReleases.length && !cookReady.length && !upToDate.length) {
+    if (!todayReleases.length && !cookReady.length && !irregular.length && !upToDate.length) {
       html = `<div class="empty"><div class="empty-icon">📅</div><div class="empty-msg">Nothing for this day</div></div>`;
     }
     if (todayReleases.length) {
@@ -414,6 +420,10 @@
         const n = (e.latestChapter || 0) - (e.chapter || 0);
         return entryRow(e, n > 0 ? `<span class="tag tag-cook">×${n}</span>` : '');
       }).join('');
+    }
+    if (irregular.length) {
+      html += `<div class="slabel sgap">Irregular schedule</div>`;
+      html += irregular.map(e => entryRow(e, `<span class="tag tag-soon">irregular</span>`)).join('');
     }
     if (upToDate.length) {
       html += `<div class="slabel sgap">Up to date</div>`;
@@ -953,11 +963,17 @@
     if (releaseType === 'monthly') {
       releaseDayOfMonth = Math.min(Math.max(parseInt($('f-day-of-month')?.value || '1') || 1, 1), 31);
     } else {
-      releaseDays = [...document.querySelectorAll('#day-chips .dchip.on')].map(b => parseInt(b.dataset.day));
       freq = parseInt(document.querySelector('#freq-chips .fchip.on')?.dataset.freq || '1');
-      // If no day is picked, default to today so the entry always ends up
-      // with an actual schedule instead of "schedule unknown".
-      if (!releaseDays.length) releaseDays = [new Date().getDay()];
+      if (freq === 0) {
+        // Irregular — deliberately no fixed day, so no default-to-today either.
+        releaseDays = [];
+      } else {
+        releaseDays = [...document.querySelectorAll('#day-chips .dchip.on')].map(b => parseInt(b.dataset.day));
+        // If no day is picked, default to today so the entry always ends up
+        // with an actual schedule instead of "schedule unknown". Only makes
+        // sense for a fixed weekly frequency, not Irregular (handled above).
+        if (!releaseDays.length) releaseDays = [new Date().getDay()];
+      }
     }
     const sources = getSourcesFromForm();
     const altNames = getAltNamesFromForm();
@@ -1070,6 +1086,7 @@
     document.querySelectorAll('#schedtype-pills .pill').forEach((p, i) => p.classList.toggle('on', i === 0));
     if ($('weekly-schedule'))  $('weekly-schedule').style.display  = '';
     if ($('monthly-schedule')) $('monthly-schedule').style.display = 'none';
+    if ($('day-chips'))        $('day-chips').style.display        = '';
     if ($('f-day-of-month'))   $('f-day-of-month').value = '1';
     if ($('altnames-list'))    $('altnames-list').innerHTML = '';
     clearPreviewImage();
@@ -1136,10 +1153,11 @@
     document.querySelectorAll('#day-chips .dchip').forEach(b =>
       b.classList.toggle('on', (entry.releaseDays || []).includes(parseInt(b.dataset.day)))
     );
-    const freq = entry.releaseFreq || 1;
+    const freq = entry.releaseFreq ?? 1;
     document.querySelectorAll('#freq-chips .fchip').forEach(b =>
       b.classList.toggle('on', parseInt(b.dataset.freq) === freq)
     );
+    if ($('day-chips')) $('day-chips').style.display = (freq === 0) ? 'none' : '';
     const isMonthly = entry.releaseType === 'monthly';
     document.querySelectorAll('#schedtype-pills .pill').forEach(p =>
       p.classList.toggle('on', p.dataset.schedtype === (isMonthly ? 'monthly' : 'weekly'))
@@ -1339,16 +1357,15 @@
     });
 
     signinBtn?.addEventListener('click', async () => {
-      const username   = $('sync-username')?.value.trim();
-      const phrasekey  = $('sync-phrasekey')?.value.trim();
-      if (!username || !phrasekey) { showToast('Enter username and phrase-key'); return; }
+      const email = $('sync-email')?.value.trim();
+      if (!email) { showToast('Enter your email'); return; }
       const dot   = $('sync-dot');
       const label = $('sync-label');
       if (dot) dot.className = 'sync-dot busy';
       if (label) label.textContent = 'Signing in…';
       try {
-        await Sync.login(username, phrasekey);
-        state.syncUser = username;
+        await Sync.login(email);
+        state.syncUser = email;
         showToast('Signed in');
         renderSyncStatus();
       } catch(e) {
@@ -1478,6 +1495,12 @@
       btn.addEventListener('click', () => {
         document.querySelectorAll('#freq-chips .fchip').forEach(b => b.classList.remove('on'));
         btn.classList.add('on');
+        const isIrregular = btn.dataset.freq === '0';
+        if ($('day-chips')) $('day-chips').style.display = isIrregular ? 'none' : '';
+        if (isIrregular) {
+          // Clear any previously-picked days so they don't linger unseen in the data
+          document.querySelectorAll('#day-chips .dchip.on').forEach(p => p.classList.remove('on'));
+        }
       })
     );
     document.querySelectorAll('#day-chips .dchip').forEach(btn =>
@@ -1540,7 +1563,7 @@
     // Try to restore sync session silently
     try {
       const session = await Sync.restoreSession();
-      if (session) state.syncUser = session.username;
+      if (session) state.syncUser = session.email;
     } catch(_) {}
 
     switchNav('add');
