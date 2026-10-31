@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MangaTracker</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+/* Bundled locally: the old remote @import blocked the first paint until
+   Google Fonts answered, which felt like the panel was hanging on a slow link. */
+@font-face{font-family:'JetBrains Mono';font-weight:400;font-style:normal;font-display:swap;src:url('fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-style:normal;font-display:swap;src:url('fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2')}
 
 *{box-sizing:border-box;margin:0;padding:0}
 
@@ -21,8 +24,10 @@
   --acc2:#9d8fff;
   --acc-dim:#7c6af720;
   --txt:#e8eaf0;
-  --txt2:#8a8fa8;
-  --txt3:#555a70;
+  /* Text colours: every one passes WCAG AA (4.5:1) on all four backgrounds.
+     --txt3 used to be #555a70 (2.7:1) — that was the "hard to read" text. */
+  --txt2:#a3a9c0;
+  --txt3:#868ca6;
   --green:#3ecf8e;
   --amber:#f0a04b;
   --red:#e06b6b;
@@ -161,6 +166,7 @@ html,body{
 .tag-new{background:#7c6af718;color:var(--acc2);border:1px solid #7c6af730}
 .tag-cook{background:#f0a04b14;color:var(--amber);border:1px solid #f0a04b28}
 .tag-soon{background:#ffffff08;color:var(--txt3);border:1px solid var(--line2)}
+.tag-pause{background:#4fb3d914;color:#4fb3d9;border:1px solid #4fb3d930}
 
 .mark-read-btn{
   display:block;font-size:9px;padding:2px 6px;border-radius:4px;
@@ -176,6 +182,7 @@ html,body{
 .dot-drop{background:var(--red)}
 .dot-done{background:var(--txt3)}
 .dot-season{background:#a78bfa}
+.dot-pause{background:#4fb3d9}
 
 /* ── Library controls ────────────────────── */
 .libctrl{display:flex;gap:6px;margin-bottom:12px;align-items:center}
@@ -457,7 +464,7 @@ html,body{
   font-size:11px;color:var(--txt);white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;
 }
-.match-meta{font-size:9px;color:var(--txt3);letter-spacing:.05em}
+.match-meta{font-size:10px;line-height:1.5;color:var(--txt2);letter-spacing:.03em}
 .match-actions{
   display:flex;gap:6px;padding:0 12px 10px;flex-wrap:wrap;
 }
@@ -538,6 +545,17 @@ html,body{
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
+.hchip{font-size:10px;color:var(--txt2);letter-spacing:.06em;display:flex;align-items:center;gap:6px}
+.hchip .sync-dot{cursor:help}
+.libcount{font-size:10px;color:var(--txt3);letter-spacing:.04em;margin:-4px 0 8px}
+.morebtn{display:block;width:100%;margin:10px 0 4px;padding:7px;border-radius:var(--radius);border:1px dashed var(--line2);background:none;color:var(--txt2);font-family:var(--font);font-size:10px;letter-spacing:.08em;cursor:pointer}
+.morebtn:hover{border-color:var(--acc2);color:var(--acc2)}
+.pill.hidden{display:none}
+.hint{font-size:10px;color:var(--txt3);margin-top:6px;letter-spacing:.02em}
+.detect-type{font-size:10px;color:var(--txt2);margin-top:3px;letter-spacing:.04em}
+.sync-detail{font-size:10px;color:var(--txt3);margin:-4px 0 10px;line-height:1.6;word-break:break-word}
+.sync-detail.err{color:var(--red)}
+
 /* ── Sidebar tweaks ──────────────────────── */
 .modal-bg{position:fixed}
 </style>
@@ -547,6 +565,7 @@ html,body{
 <div id="app">
   <div class="header">
     <span class="logo">Manga<span>Tracker</span></span>
+    <span class="hchip" title="Total titles in your library"><span id="hdr-count">–</span><span class="sync-dot" id="hdr-sync" title="Sync: not signed in"></span></span>
     <button class="hbtn" id="closebtn" title="Close sidebar">
       <svg width="11" height="11" viewBox="0 0 11 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M1 1l9 9M10 1l-9 9"/></svg>
       Close
@@ -605,25 +624,25 @@ html,body{
             </div>
             <select class="fsel" id="lib-type-filter">
               <option value="">All types</option>
-              <option value="manhwa">Manhwa</option>
-              <option value="manga">Manga</option>
-              <option value="manhua">Manhua</option>
-              <option value="anime">Anime</option>
             </select>
             <select class="fsel" id="lib-status-filter">
               <option value="">All</option>
               <option value="ongoing">Following</option>
               <option value="cooking">Cooking</option>
+              <option value="paused">Paused</option>
               <option value="completed">Completed</option>
+              <option value="hiatus">Hiatus</option>
               <option value="season_end">Season End</option>
               <option value="dropped">Dropped</option>
             </select>
           </div>
+          <div class="libcount" id="lib-count"></div>
           <div id="lib-all-content"></div>
         </div>
 
         <!-- LIBRARY by site -->
         <div class="panel" id="pane-library-bysite">
+          <div class="libcount" id="lib-count-site"></div>
           <div id="lib-site-content"></div>
         </div>
 
@@ -675,13 +694,8 @@ html,body{
           <div class="row2">
             <div class="field">
               <label class="flabel">Type</label>
-              <select class="fselect" id="f-type">
-                <option value="manhwa">Manhwa</option>
-                <option value="manga">Manga</option>
-                <option value="manhua">Manhua</option>
-                <option value="anime">Anime</option>
-                <option value="webtoon">Webtoon</option>
-              </select>
+              <select class="fselect" id="f-type"></select>
+              <div class="detect-type" id="detect-type"></div>
             </div>
             <div class="field">
               <label class="flabel">Chapter / episode</label>
@@ -691,29 +705,12 @@ html,body{
 
           <div class="field">
             <label class="flabel">Genre</label>
-            <div class="pills" id="trope-pills">
-              <button class="pill small" data-group="tropes">Isekai</button>
-              <button class="pill small" data-group="tropes">Regression</button>
-              <button class="pill small" data-group="tropes">Murim / Wuxia</button>
-              <button class="pill small" data-group="tropes">System</button>
-              <button class="pill small" data-group="tropes">Romance</button>
-              <button class="pill small" data-group="tropes">Harem</button>
-              <button class="pill small" data-group="tropes">Reincarnation</button>
-              <button class="pill small" data-group="tropes">Cultivation</button>
-              <button class="pill small" data-group="tropes">Slice of life</button>
-              <button class="pill small" data-group="tropes">Fantasy</button>
-              <button class="pill small" data-group="tropes">Historical</button>
-              <button class="pill small" data-group="tropes">Shonen</button>
-              <button class="pill small" data-group="tropes">Magic</button>
-              <button class="pill small" data-group="tropes">Action</button>
-              <button class="pill small" data-group="tropes">Adventure</button>
-              <button class="pill small" data-group="tropes">Modern</button>
-              <button class="pill small" data-group="tropes">Medieval</button>
+            <div class="custom-tag-row" id="trope-custom-row" style="margin:0 0 7px">
+              <input class="custom-tag-input" id="trope-custom-input" type="search" placeholder="Search genres, or type a new one…" maxlength="32" autocomplete="off">
+              <button class="custom-tag-add" id="trope-custom-btn" title="Add as a new genre">+</button>
             </div>
-            <div class="custom-tag-row" id="trope-custom-row">
-              <input class="custom-tag-input" id="trope-custom-input" type="text" placeholder="Add genre…" maxlength="32">
-              <button class="custom-tag-add" id="trope-custom-btn">+</button>
-            </div>
+            <div class="pills" id="trope-pills"></div>
+            <div class="hint" id="trope-hint" style="display:none"></div>
           </div>
 
           <div class="field">
@@ -759,8 +756,14 @@ html,body{
             </div>
 
             <div id="monthly-schedule" style="display:none;margin-top:8px">
-              <label class="flabel">Day of month</label>
-              <input class="finput" id="f-day-of-month" type="number" min="1" max="31" value="1" style="max-width:90px">
+              <div class="freqrow" id="monthly-chips">
+                <button class="fchip on" data-mfreq="1">Same date</button>
+                <button class="fchip" data-mfreq="0">Irregular</button>
+              </div>
+              <div id="monthly-date">
+                <label class="flabel">Day of month</label>
+                <input class="finput" id="f-day-of-month" type="number" min="1" max="31" value="1" style="max-width:90px">
+              </div>
             </div>
           </div>
 
@@ -770,6 +773,7 @@ html,body{
               <div class="pills" id="mode-pills">
                 <button class="pill on" data-group="mode">Following</button>
                 <button class="pill" data-group="mode">Cooking</button>
+                <button class="pill" data-group="mode" title="Set aside on purpose — works for finished series too">Paused</button>
               </div>
             </div>
             <div class="field">
@@ -844,13 +848,21 @@ html,body{
               <button class="mact" id="sync-cancel-btn" style="flex:0;white-space:nowrap;padding:7px 10px">Cancel</button>
             </div>
           </div>
+          <div class="sync-detail" id="sync-detail"></div>
           <div id="sync-controls" style="display:none;margin-top:8px">
             <div style="display:flex;gap:6px">
-              <button class="mact primary" id="sync-push-btn">Push to cloud</button>
-              <button class="mact" id="sync-pull-btn">Pull from cloud</button>
+              <button class="mact primary" id="sync-now-btn" title="Merge with the cloud and upload your changes">Sync now</button>
+              <button class="mact" id="sync-full-btn" title="Re-read the whole cloud copy and re-upload everything (repair)">Full re-sync</button>
             </div>
           </div>
           <div class="slabel" style="margin-top:16px;margin-bottom:12px">Data</div>
+          <div class="srow">
+            <div class="sleft">
+              <div class="stitle">Library size</div>
+              <div class="sdesc" id="lib-size">Calculating…</div>
+            </div>
+            <button class="hbtn" id="optimise-btn" title="Shrinks large cover images — makes the panel quicker and syncing smaller">Optimise covers</button>
+          </div>
           <div class="srow">
             <div class="sleft">
               <div class="stitle">Export library</div>
@@ -880,8 +892,10 @@ html,body{
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
+<script src="src/shared/mt-model.js"></script>
+<script src="src/shared/mt-schedule.js"></script>
+<script src="src/shared/mt-cloud.js"></script>
 <script src="src/storage.js"></script>
-<script src="src/schedule.js"></script>
 <script src="src/firebase.js"></script>
 <script src="src/popup.js"></script>
 </body>

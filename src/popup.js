@@ -1,15 +1,13 @@
 (() => {
-  const DAYS      = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const DAYS_FULL = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  // Shared with the web app (src/shared/*.js — identical copies live in docs/shared/)
+  const Schedule = MTSchedule;
+  const { DAYS, DAYS_FULL } = Schedule;
+  const DEFAULT_GENRES = MTModel.DEFAULT_GENRES;
+  const DEFAULT_VIBES  = MTModel.DEFAULT_VIBES;
 
-  const DEFAULT_GENRES = [
-    'Isekai','Regression','Murim / Wuxia','System','Romance','Harem',
-    'Reincarnation','Cultivation','Slice Of Life','Fantasy','Historical',
-    'Shonen','Magic','Action','Adventure','Modern','Medieval'
-  ];
-  const DEFAULT_VIBES = [
-    'Hype','Comfort Read','Binge-worthy','Slow Burn','Emotional','Tense','Guilty Pleasure'
-  ];
+  const PAGE_SIZE = 50;           // rows drawn at a time in long lists
+  const COVER_MAX_W = 240;        // cover art is stored at most this wide…
+  const COVER_QUALITY = 0.78;     // …as a JPEG at this quality (~10–20 KB each)
 
   let state = {
     nav: 'today',
@@ -26,6 +24,8 @@
     libSearch: '',
     libTypeFilter: '',
     libStatusFilter: '',
+    libShown: PAGE_SIZE,
+    upShown: 30,
     uploadedImageData: null, // base64 for manually uploaded image
     syncUser: null,
   };
@@ -49,6 +49,7 @@
 
   function statusDot(entry) {
     if (entry.status === 'dropped')    return '<span class="sdot dot-drop"></span>';
+    if (entry.mode   === 'paused')     return '<span class="sdot dot-pause"></span>';
     if (entry.mode   === 'cooking')    return '<span class="sdot dot-cook"></span>';
     if (entry.status === 'completed')  return '<span class="sdot dot-done"></span>';
     if (entry.status === 'season_end') return '<span class="sdot dot-season"></span>';
@@ -61,14 +62,33 @@
     const imgSrc = entry.imageData || entry.image || '';
     if (imgSrc) {
       return `<div class="art" style="${style}">
-        <img src="${escHtml(imgSrc)}" alt="" onerror="this.parentElement.innerHTML='📖'">
+        <img src="${escHtml(imgSrc)}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='📖'">
       </div>`;
     }
-    const icons = { manhwa:'📖', manga:'📚', manhua:'📕', anime:'🎬', webtoon:'🌐' };
-    return `<div class="art" style="${style}">${icons[entry.type] || '📖'}</div>`;
+    return `<div class="art" style="${style}">${MTModel.typeIcon(entry.type)}</div>`;
   }
 
-  function chLabel(entry) { return entry.type === 'anime' ? 'ep.' : 'ch.'; }
+  function chLabel(entry) { return MTModel.chLabel(entry); }
+
+  // "paused", "paused (completed)", "cooking", or the series status.
+  function statusText(entry) {
+    const st = MTModel.statusLabel(entry.status || 'ongoing').toLowerCase();
+    if (entry.mode === 'paused') return (entry.status && entry.status !== 'ongoing') ? `paused (${st})` : 'paused';
+    if (entry.mode === 'cooking') return 'cooking';
+    return st;
+  }
+
+  function daysAgoLabel(ts) {
+    if (!ts) return '';
+    const d = Math.floor((Date.now() - ts) / 86400000);
+    return d < 1 ? 'today' : d === 1 ? '1d' : d < 60 ? `${d}d` : `${Math.round(d / 30)}mo`;
+  }
+
+  function updateCounts() {
+    const n = state.entries.length;
+    const el = $('hdr-count');
+    if (el) el.textContent = `${n} ${n === 1 ? 'title' : 'titles'}`;
+  }
 
   function ordinal(n) {
     const s = ['th','st','nd','rd'], v = n % 100;
@@ -76,10 +96,10 @@
   }
 
   function releaseSummary(entry) {
+    if (Schedule.isIrregular(entry)) return entry.releaseType === 'monthly' ? 'Monthly · irregular' : 'Irregular';
     if (entry.releaseType === 'monthly') {
       return entry.releaseDayOfMonth ? `Monthly · ${ordinal(entry.releaseDayOfMonth)}` : 'schedule unknown';
     }
-    if (Schedule.isIrregular(entry)) return 'Irregular';
     if (!entry.releaseDays || !entry.releaseDays.length) return 'schedule unknown';
     const days = entry.releaseDays.map(d => DAYS[d]).join(', ');
     const freq  = (entry.releaseFreq ?? 1) > 1 ? `${entry.releaseFreq}×/wk · ` : '';
@@ -87,6 +107,7 @@
   }
 
   function nextReleaseLabel(entry) {
+    if (Schedule.isIrregular(entry)) return 'irregular';
     if (entry.releaseType === 'monthly') {
       if (!entry.releaseDayOfMonth) return 'unknown';
       const now = new Date();
@@ -235,7 +256,7 @@
     const imgSrc      = entry.imageData || entry.image || '';
     const artEl       = imgSrc
       ? `<img src="${escHtml(imgSrc)}" alt="" style="width:36px;height:49px;object-fit:cover;border-radius:4px;flex-shrink:0" onerror="this.style.display='none'">`
-      : `<div style="width:36px;height:49px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${{manhwa:'📖',manga:'📚',manhua:'📕',anime:'🎬',webtoon:'🌐'}[entry.type]||'📖'}</div>`;
+      : `<div style="width:36px;height:49px;border-radius:4px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${MTModel.typeIcon(entry.type)}</div>`;
 
     const urlChapter = match.urlChapter || null;
     // On a chapter page and we know which chapter, offer quick mark-read
@@ -251,7 +272,7 @@
         ${artEl}
         <div class="match-info">
           <div class="match-title">${escHtml(entry.title)}</div>
-          <div class="match-meta">${escHtml(entry.hostname || '')} · ${chLabel(entry)} ${entry.chapter || 0}${canMarkRead ? ` → <strong style="color:var(--acc2)">${urlChapter}</strong>` : ''} · ${escHtml(entry.status || 'ongoing')}</div>
+          <div class="match-meta">${escHtml(entry.hostname || '')} · ${chLabel(entry)} ${entry.chapter || 0}${canMarkRead ? ` → <strong style="color:var(--acc2)">${urlChapter}</strong>` : ''} · ${escHtml(statusText(entry))}</div>
         </div>
       </div>
       <div class="match-actions">
@@ -348,13 +369,16 @@
     document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
     const nav = state.nav;
     let paneId;
-    if (nav === 'today')    { paneId = `pane-today-${state.stab.today}`;       renderTodayPanel(); renderWeekPanel(); }
-    if (nav === 'library')  { paneId = `pane-library-${state.stab.library}`;   renderLibraryAll(); renderLibrarySite(); }
+    // Draw only what is on screen — the hidden sub-tab is drawn when it is opened.
+    if (nav === 'today')    { paneId = `pane-today-${state.stab.today}`;
+                              if (state.stab.today === 'week') renderWeekPanel(); else renderTodayPanel(); }
+    if (nav === 'library')  { paneId = `pane-library-${state.stab.library}`; renderLibrary(); }
     if (nav === 'add')      { paneId = 'pane-add';      setupAddPanel(); }
     if (nav === 'sites')    { paneId = 'pane-sites';    renderSites(); }
-    if (nav === 'settings') { paneId = 'pane-settings'; renderSyncStatus(); }
+    if (nav === 'settings') { paneId = 'pane-settings'; renderSyncStatus(); updateLibSize(); }
     const pane = $(paneId);
     if (pane) pane.classList.add('active');
+    updateCounts();
   }
 
   // ── Today ──────────────────────────────────────────────────────────────────
@@ -387,52 +411,70 @@
     const c = $('today-content');
     if (!c) return;
     const { settings, entries, selectedDate } = state;
-    const todayReleases = entries.filter(e =>
-      Schedule.isReleaseOnDate(e, selectedDate) &&
-      e.status !== 'dropped' && e.status !== 'season_end'
-    );
+    // isReleaseOnDate already ignores paused / completed / hiatus / season-end / dropped / irregular.
+    const todayReleases = entries.filter(e => Schedule.isReleaseOnDate(e, selectedDate));
     const cookReady = entries.filter(e =>
       e.mode === 'cooking' && e.status !== 'dropped' &&
       ((e.latestChapter || 0) - (e.chapter || 0)) >= (settings.cookThreshold || 10)
     );
     const irregular = entries.filter(e =>
-      Schedule.isIrregular(e) && e.mode !== 'cooking' &&
-      e.status !== 'dropped' && e.status !== 'season_end'
+      Schedule.isIrregular(e) && Schedule.isTracking(e) && e.mode !== 'cooking'
     );
-    const upToDate = settings.showUpToDate !== false
+    const upToDateAll = settings.showUpToDate !== false
       ? entries.filter(e => {
-          if (e.status === 'dropped' || e.mode === 'cooking' || Schedule.isIrregular(e)) return false;
+          if (e.status === 'dropped' || e.mode === 'cooking' || e.mode === 'paused' || Schedule.isIrregular(e)) return false;
           return !Schedule.isReleaseOnDate(e, selectedDate);
         })
       : [];
+    const upToDate = upToDateAll.slice(0, state.upShown);
+    const paused = entries.filter(e => e.mode === 'paused' && e.status !== 'dropped')
+      .sort((a, b) => (b.pausedAt || 0) - (a.pausedAt || 0));
 
     let html = '';
-    if (!todayReleases.length && !cookReady.length && !irregular.length && !upToDate.length) {
+    if (!todayReleases.length && !cookReady.length && !irregular.length && !upToDateAll.length && !paused.length) {
       html = `<div class="empty"><div class="empty-icon">📅</div><div class="empty-msg">Nothing for this day</div></div>`;
     }
     if (todayReleases.length) {
-      html += `<div class="slabel">New releases</div>`;
+      html += `<div class="slabel">New releases<span>${todayReleases.length}</span></div>`;
       html += todayReleases.map(e => entryRow(e, `<span class="tag tag-new">new</span>`, true)).join('');
     }
     if (cookReady.length) {
-      html += `<div class="slabel sgap">Ready to read — cooking done</div>`;
+      html += `<div class="slabel sgap">Ready to read — cooking done<span>${cookReady.length}</span></div>`;
       html += cookReady.map(e => {
         const n = (e.latestChapter || 0) - (e.chapter || 0);
         return entryRow(e, n > 0 ? `<span class="tag tag-cook">×${n}</span>` : '');
       }).join('');
     }
     if (irregular.length) {
-      html += `<div class="slabel sgap">Irregular schedule</div>`;
-      html += irregular.map(e => entryRow(e, `<span class="tag tag-soon">irregular</span>`)).join('');
+      html += `<div class="slabel sgap">Irregular schedule<span>${irregular.length}</span></div>`;
+      html += irregular.map(e => entryRow(e, `<span class="tag tag-soon">${e.releaseType === 'monthly' ? 'monthly · irregular' : 'irregular'}</span>`)).join('');
     }
-    if (upToDate.length) {
-      html += `<div class="slabel sgap">Up to date</div>`;
-      html += upToDate.map(e =>
-        entryRow(e, `<span class="tag tag-soon">${nextReleaseLabel(e)}</span>`)
-      ).join('');
+    if (upToDateAll.length) {
+      html += `<div class="slabel sgap">Up to date<span>${upToDateAll.length}</span></div>`;
+      html += upToDate.map(e => {
+        // A finished / paused-by-the-author series has no "next release" to show.
+        const tag = Schedule.NOT_RELEASING.includes(e.status)
+          ? MTModel.statusLabel(e.status).toLowerCase() : nextReleaseLabel(e);
+        return entryRow(e, `<span class="tag tag-soon">${escHtml(tag)}</span>`);
+      }).join('');
+      if (upToDateAll.length > upToDate.length) {
+        html += `<button class="morebtn" id="more-uptodate">Show ${Math.min(PAGE_SIZE, upToDateAll.length - upToDate.length)} more (${upToDateAll.length - upToDate.length} left)</button>`;
+      }
+    }
+    if (paused.length) {
+      const top = paused.slice(0, 5);
+      html += `<div class="slabel sgap">Paused<span>${paused.length}</span></div>`;
+      html += top.map(e => entryRow(e, `<span class="tag tag-pause">paused${e.pausedAt ? ' ' + daysAgoLabel(e.pausedAt) : ''}</span>`)).join('');
+      if (paused.length > top.length) html += `<button class="morebtn" id="goto-paused">Show all ${paused.length} paused in Library</button>`;
     }
     c.innerHTML = html;
     attachEntryClicks(c);
+    $('more-uptodate')?.addEventListener('click', () => { state.upShown += PAGE_SIZE; renderTodayContent(); });
+    $('goto-paused')?.addEventListener('click', () => {
+      state.libStatusFilter = 'paused'; state.libShown = PAGE_SIZE;
+      if ($('lib-status-filter')) $('lib-status-filter').value = 'paused';
+      switchStab('library', 'all'); switchNav('library');
+    });
   }
 
   function renderTodayPanel() { renderDayStrip(); renderTodayContent(); }
@@ -509,28 +551,50 @@
     return state.entries.filter(e => {
       if (state.libSearch) {
         const q = state.libSearch.toLowerCase();
-        const hit = e.title.toLowerCase().includes(q)
+        const hit = (e.title || '').toLowerCase().includes(q)
+          || (e.altNames || []).some(n => n.toLowerCase().includes(q))
           || (e.tropes || []).some(t => t.toLowerCase().includes(q))
           || (e.hostname || '').toLowerCase().includes(q);
         if (!hit) return false;
       }
       if (state.libTypeFilter && e.type !== state.libTypeFilter) return false;
-      if (state.libStatusFilter) {
-        if (state.libStatusFilter === 'ongoing'    && e.mode !== 'following')      return false;
-        if (state.libStatusFilter === 'cooking'    && e.mode !== 'cooking')        return false;
-        if (state.libStatusFilter === 'completed'  && e.status !== 'completed')    return false;
-        if (state.libStatusFilter === 'dropped'    && e.status !== 'dropped')      return false;
-        if (state.libStatusFilter === 'season_end' && e.status !== 'season_end')   return false;
+      switch (state.libStatusFilter) {
+        case 'ongoing':    if (e.mode !== 'following')      return false; break;
+        case 'cooking':    if (e.mode !== 'cooking')        return false; break;
+        case 'paused':     if (e.mode !== 'paused')         return false; break;
+        case 'completed':  if (e.status !== 'completed')    return false; break;
+        case 'hiatus':     if (e.status !== 'hiatus')       return false; break;
+        case 'dropped':    if (e.status !== 'dropped')      return false; break;
+        case 'season_end': if (e.status !== 'season_end')   return false; break;
       }
       return true;
     });
   }
 
+  function countLine(shown, filtered) {
+    const total = state.entries.length;
+    const filteredNow = filtered !== total;
+    return filteredNow
+      ? `Showing ${shown} of ${filtered} matching · ${total} ${total === 1 ? 'title' : 'titles'} in total`
+      : `${total} ${total === 1 ? 'title' : 'titles'}`;
+  }
+
+  function moreButton(left, id) {
+    return `<button class="morebtn" id="${id}">Show ${Math.min(PAGE_SIZE, left)} more (${left} left)</button>`;
+  }
+
+  // Draws whichever library sub-tab is open.
+  function renderLibrary() {
+    if (state.stab.library === 'bysite') renderLibrarySite(); else renderLibraryAll();
+  }
+
   function renderLibraryAll() {
     const c = $('lib-all-content');
     if (!c) return;
-    const entries = filteredEntries();
-    if (!entries.length) {
+    const all = filteredEntries();
+    const entries = all.slice(0, state.libShown);
+    if ($('lib-count')) $('lib-count').textContent = countLine(entries.length, all.length);
+    if (!all.length) {
       c.innerHTML = `<div class="empty"><div class="empty-icon">📚</div>
         <div class="empty-msg">${state.entries.length ? 'No matches.' : 'No entries yet.'}</div></div>`;
       return;
@@ -540,40 +604,52 @@
         ${artHtml(e, 32)}
         <div class="ebody">
           <div class="etitle">${escHtml(e.title)}</div>
-          <div class="emeta">${statusDot(e)}${escHtml(e.mode)} · ${escHtml(releaseSummary(e))}</div>
+          <div class="emeta">${statusDot(e)}${escHtml(statusText(e))} · ${escHtml(releaseSummary(e))}</div>
         </div>
         <div class="eright">
           <div class="echnum">${chLabel(e)} ${e.chapter || 0}</div>
           <div style="font-size:9px;color:var(--txt3);margin-top:2px">${escHtml(e.hostname || '')}</div>
         </div>
       </div>`
-    ).join('');
+    ).join('') + (all.length > entries.length ? moreButton(all.length - entries.length, 'more-lib') : '');
     attachEntryClicks(c);
+    $('more-lib')?.addEventListener('click', () => { state.libShown += PAGE_SIZE; renderLibraryAll(); });
   }
 
   function renderLibrarySite() {
     const c = $('lib-site-content');
     if (!c) return;
+    const all = filteredEntries();
     const groups = {};
-    filteredEntries().forEach(e => {
+    all.forEach(e => {
       const k = e.hostname || 'unknown';
       (groups[k] = groups[k] || []).push(e);
     });
     if (!Object.keys(groups).length) {
-      c.innerHTML = `<div class="empty"><div class="empty-icon">🌐</div><div class="empty-msg">No entries yet.</div></div>`;
+      if ($('lib-count-site')) $('lib-count-site').textContent = countLine(0, 0);
+      c.innerHTML = `<div class="empty"><div class="empty-icon">🌐</div><div class="empty-msg">${state.entries.length ? 'No matches.' : 'No entries yet.'}</div></div>`;
       return;
     }
-    c.innerHTML = Object.entries(groups).map(([site, es]) =>
-      `<div class="grouphead"><span>${escHtml(site)}</span><span class="gcnt">${es.length}</span></div>` +
-      es.map(e => `<div class="entry" data-id="${e.id}">
-        ${artHtml(e, 32)}
-        <div class="ebody">
-          <div class="etitle">${escHtml(e.title)}</div>
-          <div class="emeta">${statusDot(e)}${escHtml(e.mode)} · ${chLabel(e)} ${e.chapter || 0}</div>
-        </div>
-      </div>`).join('')
-    ).join('');
+    // Draw groups until the page budget is used up; headings show true totals.
+    let budget = state.libShown, drawn = 0, html = '';
+    for (const [site, es] of Object.entries(groups)) {
+      if (budget <= 0) break;
+      const part = es.slice(0, budget);
+      budget -= part.length; drawn += part.length;
+      html += `<div class="grouphead"><span>${escHtml(site)}</span><span class="gcnt">${es.length}</span></div>` +
+        part.map(e => `<div class="entry" data-id="${e.id}">
+          ${artHtml(e, 32)}
+          <div class="ebody">
+            <div class="etitle">${escHtml(e.title)}</div>
+            <div class="emeta">${statusDot(e)}${escHtml(statusText(e))} · ${chLabel(e)} ${e.chapter || 0}</div>
+          </div>
+        </div>`).join('');
+    }
+    if (all.length > drawn) html += moreButton(all.length - drawn, 'more-site');
+    if ($('lib-count-site')) $('lib-count-site').textContent = countLine(drawn, all.length);
+    c.innerHTML = html;
     attachEntryClicks(c);
+    $('more-site')?.addEventListener('click', () => { state.libShown += PAGE_SIZE; renderLibrarySite(); });
   }
 
   // ── Add / Edit panel ───────────────────────────────────────────────────────
@@ -624,19 +700,82 @@
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } });
   }
 
-  function setupAddPanel() {
-    // Render custom tags that have been saved previously
-    const tropePills = $('trope-pills');
-    const vibePills  = $('vibe-pills');
-    if (tropePills) buildTagPills(tropePills, state.customGenres, 'tropes');
-    if (vibePills)  buildTagPills(vibePills,  state.customVibes,  'vibes');
+  // Genre pills = built-in list + your own + anything already used on an entry
+  // (so genres typed on the web app show up here too). Existing pills — and
+  // whether they are ticked — are left alone; only missing ones are added.
+  function ensureGenrePills(extra = []) {
+    const pills = $('trope-pills');
+    if (!pills) return;
+    buildTagPills(pills, MTModel.unionGenres(DEFAULT_GENRES, state.customGenres, state.entries.flatMap(e => e.tropes || []), extra), 'tropes');
+  }
 
-    // Wire custom input buttons (idempotent via flag)
-    if (!$('trope-custom-btn').dataset.wired) {
-      setupCustomTagInput('trope-custom-input','trope-custom-btn','trope-pills','tropes');
+  function addGenrePill(label, on) {
+    const pills = $('trope-pills');
+    const btn = document.createElement('button');
+    btn.className = 'pill small' + (on ? ' on' : '');
+    btn.dataset.group = 'tropes';
+    btn.textContent = label;
+    btn.addEventListener('click', () => btn.classList.toggle('on'));
+    pills.appendChild(btn);
+    return btn;
+  }
+
+  // One box that both searches the genre list and adds a new genre.
+  //   type      → pills narrow to matches (ticked ones always stay visible)
+  //   Enter / + → ticks/unticks the exact match, or adds your text as a new genre
+  function setupGenreSearch() {
+    const input = $('trope-custom-input'), btn = $('trope-custom-btn');
+    const pills = $('trope-pills'), hint = $('trope-hint');
+    if (!input || !btn || !pills || input.dataset.wired) return;
+    input.dataset.wired = '1';
+
+    function applyFilter() {
+      const q = input.value.trim();
+      const all = [...pills.querySelectorAll('.pill')];
+      let matches = 0;
+      all.forEach(p => {
+        const hit = MTModel.matchesQuery(p.textContent, q);
+        if (hit) matches++;
+        p.classList.toggle('hidden', !(hit || p.classList.contains('on')));
+      });
+      if (!q) { hint.style.display = 'none'; return; }
+      const exact = all.find(p => p.textContent.trim().toLowerCase() === q.toLowerCase());
+      hint.style.display = '';
+      hint.textContent = exact
+        ? `“${exact.textContent.trim()}” is in the list — press Enter to ${exact.classList.contains('on') ? 'untick' : 'tick'} it.`
+        : matches
+          ? `${matches} match${matches === 1 ? '' : 'es'} — or press Enter / + to add “${q}” as a new genre.`
+          : `No match — press Enter / + to add “${q}” as a new genre.`;
+    }
+
+    function commit() {
+      const q = input.value.trim();
+      if (!q) return;
+      const exact = [...pills.querySelectorAll('.pill')].find(p => p.textContent.trim().toLowerCase() === q.toLowerCase());
+      if (exact) exact.classList.toggle('on');
+      else {
+        addGenrePill(q, true);
+        if (!state.customGenres.some(g => g.toLowerCase() === q.toLowerCase())) { state.customGenres.push(q); saveCustomTags(); }
+      }
+      input.value = '';
+      applyFilter();
+    }
+
+    input.addEventListener('input', applyFilter);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } });
+    btn.addEventListener('click', commit);
+  }
+
+  function setupAddPanel() {
+    const vibePills = $('vibe-pills');
+    ensureGenrePills();
+    if (vibePills) buildTagPills(vibePills, state.customVibes, 'vibes');
+
+    // Wire the genre search and the vibe "add" box once.
+    if (!$('vibe-custom-btn').dataset.wired) {
+      setupGenreSearch();
       setupCustomTagInput('vibe-custom-input','vibe-custom-btn','vibe-pills','vibes');
-      $('trope-custom-btn').dataset.wired = '1';
-      $('vibe-custom-btn').dataset.wired  = '1';
+      $('vibe-custom-btn').dataset.wired = '1';
     }
 
     if (!state.editId) detectPageInfo();
@@ -666,6 +805,19 @@
     if ($('detect-site')) $('detect-site').textContent = info.hostname || '—';
     if ($('f-title') && !$('f-title').dataset.edited) $('f-title').value = info.title || '';
 
+    // Type (manga / manhwa / anime …): applied only when the detector is at
+    // least moderately sure, and never over a choice you made yourself.
+    const typeEl = $('f-type'), typeNote = $('detect-type');
+    if (typeNote) {
+      const label = info.type ? MTModel.typeInfo(info.type).label : '';
+      typeNote.textContent = !info.type ? ''
+        : ['medium', 'high'].includes(info.typeConfidence) ? `Detected: ${label} (${info.typeConfidence} confidence)`
+        : `Possibly ${label} — please check`;
+    }
+    if (info.type && typeEl && !typeEl.dataset.edited && ['medium', 'high'].includes(info.typeConfidence)) {
+      typeEl.value = info.type;
+    }
+
     // Auto-fill chapter from URL if detected and field hasn't been manually edited
     if (info.chapter && $('f-chapter') && !$('f-chapter').dataset.edited) {
       $('f-chapter').value = info.chapter;
@@ -687,23 +839,13 @@
 
     // Auto-tick detected genres
     if (info.genres && info.genres.length) {
+      ensureGenrePills(info.genres);
       const pills = $('trope-pills');
       if (pills) {
         info.genres.forEach(g => {
-          let match = [...pills.querySelectorAll('.pill')].find(p =>
-            p.textContent.trim().toLowerCase() === g.toLowerCase()
-          );
-          if (!match) {
-            // Add as a new pill and auto-select
-            const btn = document.createElement('button');
-            btn.className = 'pill small on';
-            btn.dataset.group = 'tropes';
-            btn.textContent = g;
-            btn.addEventListener('click', () => btn.classList.toggle('on'));
-            pills.appendChild(btn);
-          } else {
-            match.classList.add('on');
-          }
+          const match = [...pills.querySelectorAll('.pill')].find(p =>
+            p.textContent.trim().toLowerCase() === g.toLowerCase());
+          if (match) match.classList.add('on');
         });
       }
     }
@@ -749,9 +891,11 @@
       const file = fileInput.files[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = e => {
-        state.uploadedImageData = e.target.result;
-        setPreviewImage(e.target.result);
+      reader.onload = async e => {
+        // Uploads used to be stored at full size (often megabytes each).
+        const small = await shrinkImage(e.target.result);
+        state.uploadedImageData = small;
+        setPreviewImage(small);
         srcUpload?.classList.add('on');
         srcAuto?.classList.remove('on');
         srcPick?.classList.remove('on');
@@ -899,11 +1043,11 @@
         img.onload = () => {
           try {
             const canvas = document.createElement('canvas');
-            const scale  = Math.min(1, 400 / img.naturalWidth);
+            const scale  = Math.min(1, COVER_MAX_W / img.naturalWidth);
             canvas.width  = Math.round(img.naturalWidth  * scale);
             canvas.height = Math.round(img.naturalHeight * scale);
             canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            const dataUrl = canvas.toDataURL('image/jpeg', COVER_QUALITY);
             state.uploadedImageData = dataUrl;
             setPreviewImage(dataUrl);
             srcPick?.classList.add('on');
@@ -961,7 +1105,11 @@
     const releaseType = document.querySelector('#schedtype-pills .pill.on')?.dataset.schedtype || 'weekly';
     let releaseDays = [], freq = 1, releaseDayOfMonth = null;
     if (releaseType === 'monthly') {
-      releaseDayOfMonth = Math.min(Math.max(parseInt($('f-day-of-month')?.value || '1') || 1, 1), 31);
+      // Monthly can be a fixed date OR irregular (no predictable date).
+      // Irregular is stored as releaseFreq 0, the same marker weekly uses.
+      const monthlyFreq = parseInt(document.querySelector('#monthly-chips .fchip.on')?.dataset.mfreq ?? '1');
+      if (monthlyFreq === 0) { freq = 0; releaseDayOfMonth = null; }
+      else releaseDayOfMonth = Math.min(Math.max(parseInt($('f-day-of-month')?.value || '1') || 1, 1), 31);
     } else {
       freq = parseInt(document.querySelector('#freq-chips .fchip.on')?.dataset.freq || '1');
       if (freq === 0) {
@@ -993,6 +1141,28 @@
     };
   }
 
+  // Re-encode any image (data URL or URL) as a small JPEG data URL.
+  // Falls back to the original if the browser can't draw it.
+  function shrinkImage(src, maxW = COVER_MAX_W, quality = COVER_QUALITY) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, maxW / img.naturalWidth);
+          const canvas = document.createElement('canvas');
+          canvas.width  = Math.max(1, Math.round(img.naturalWidth  * scale));
+          canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // JPEG has no transparency
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch { resolve(src); }
+      };
+      img.onerror = () => resolve(src);
+      img.src = src;
+    });
+  }
+
   // Fetch a URL and encode it as a base64 data-URL via canvas.
   // Falls back to the raw URL if the fetch fails (e.g. CORS, offline).
   async function fetchImageAsDataUrl(url) {
@@ -1001,12 +1171,12 @@
       img.crossOrigin = 'anonymous';
       img.onload = () => {
         try {
-          const scale  = Math.min(1, 400 / img.naturalWidth);
+          const scale  = Math.min(1, COVER_MAX_W / img.naturalWidth);
           const canvas = document.createElement('canvas');
           canvas.width  = Math.round(img.naturalWidth  * scale);
           canvas.height = Math.round(img.naturalHeight * scale);
           canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
+          resolve(canvas.toDataURL('image/jpeg', COVER_QUALITY));
         } catch {
           // CORS-tainted or other canvas error — return raw URL as fallback
           resolve(url);
@@ -1041,6 +1211,7 @@
       savedAt: Date.now(),
       lastRead: existing?.lastRead || Date.now(),
     };
+    MTModel.stampModeChange(entry, existing);   // remembers when it was paused
 
     const btn = $('save-btn');
     const originalBtnText = btn?.textContent;
@@ -1088,6 +1259,11 @@
     if ($('monthly-schedule')) $('monthly-schedule').style.display = 'none';
     if ($('day-chips'))        $('day-chips').style.display        = '';
     if ($('f-day-of-month'))   $('f-day-of-month').value = '1';
+    document.querySelectorAll('#monthly-chips .fchip').forEach((b, i) => b.classList.toggle('on', i === 0));
+    if ($('monthly-date'))     $('monthly-date').style.display = '';
+    if ($('f-type'))           delete $('f-type').dataset.edited;
+    if ($('detect-type'))      $('detect-type').textContent = '';
+    if ($('trope-custom-input')) { $('trope-custom-input').value = ''; $('trope-custom-input').dispatchEvent(new Event('input')); }
     if ($('altnames-list'))    $('altnames-list').innerHTML = '';
     clearPreviewImage();
     state.pageInfo = null;
@@ -1128,11 +1304,13 @@
     const imgSrc = entry.imageData || entry.image || '';
     if (imgSrc) setPreviewImage(imgSrc);
 
-    // Make sure custom genre pills are rendered before ticking
-    const tropePills = $('trope-pills');
+    // Make sure every genre pill exists (including this entry's own) before ticking
     const vibePills  = $('vibe-pills');
-    if (tropePills) buildTagPills(tropePills, state.customGenres, 'tropes');
+    ensureGenrePills(entry.tropes || []);
     if (vibePills)  buildTagPills(vibePills,  state.customVibes,  'vibes');
+    if ($('f-type')) $('f-type').dataset.edited = '1';
+    if ($('detect-type')) $('detect-type').textContent = '';
+    if ($('trope-custom-input')) { $('trope-custom-input').value = ''; $('trope-custom-input').dispatchEvent(new Event('input')); }
 
     document.querySelectorAll('#trope-pills .pill').forEach(p =>
       p.classList.toggle('on', (entry.tropes || []).map(t=>t.toLowerCase()).includes(p.textContent.trim().toLowerCase()))
@@ -1153,12 +1331,19 @@
     document.querySelectorAll('#day-chips .dchip').forEach(b =>
       b.classList.toggle('on', (entry.releaseDays || []).includes(parseInt(b.dataset.day)))
     );
-    const freq = entry.releaseFreq ?? 1;
+    const isMonthly = entry.releaseType === 'monthly';
+    // For a monthly entry the weekly chips show their defaults (1×); its own
+    // "same date / irregular" choice is restored on the monthly chips below.
+    const freq = isMonthly ? 1 : (entry.releaseFreq ?? 1);
     document.querySelectorAll('#freq-chips .fchip').forEach(b =>
       b.classList.toggle('on', parseInt(b.dataset.freq) === freq)
     );
     if ($('day-chips')) $('day-chips').style.display = (freq === 0) ? 'none' : '';
-    const isMonthly = entry.releaseType === 'monthly';
+    const monthlyFreq = (isMonthly && entry.releaseFreq === 0) ? 0 : 1;
+    document.querySelectorAll('#monthly-chips .fchip').forEach(b =>
+      b.classList.toggle('on', parseInt(b.dataset.mfreq) === monthlyFreq)
+    );
+    if ($('monthly-date')) $('monthly-date').style.display = monthlyFreq === 0 ? 'none' : '';
     document.querySelectorAll('#schedtype-pills .pill').forEach(p =>
       p.classList.toggle('on', p.dataset.schedtype === (isMonthly ? 'monthly' : 'weekly'))
     );
@@ -1177,7 +1362,8 @@
     const imgSrc   = entry.imageData || entry.image || '';
     const artEl    = imgSrc
       ? `<div class="modal-art"><img src="${escHtml(imgSrc)}" alt="" onerror="this.parentElement.innerHTML='📖'"></div>`
-      : `<div class="modal-art">📖</div>`;
+      : `<div class="modal-art">${MTModel.typeIcon(entry.type)}</div>`;
+    const isPaused = entry.mode === 'paused';
 
     $('detail-modal-inner').innerHTML = `
       <div class="modal-header">
@@ -1199,7 +1385,7 @@
         <div class="mstat">
           <div class="mstat-card">
             <div class="mstat-label">Status</div>
-            <div class="mstat-val">${entry.mode === 'cooking' ? 'cooking' : escHtml(entry.status)}</div>
+            <div class="mstat-val" style="font-size:12px">${escHtml(statusText(entry))}</div>
           </div>
           <div class="mstat-card">
             <div class="mstat-label">Last read</div>
@@ -1219,6 +1405,7 @@
         </div>
         <div class="mactions">
           <button class="mact" id="modal-edit">Edit</button>
+          <button class="mact" id="modal-pause" title="${isPaused ? 'Back to reading' : 'Set aside for now — also works for completed series'}">${isPaused ? 'Resume' : 'Pause'}</button>
           ${entry.url ? `<button class="mact" id="modal-open">Open site</button>` : ''}
           <button class="mact danger" id="modal-delete">Delete</button>
         </div>
@@ -1246,6 +1433,19 @@
       showToast(`Marked ${ch} ${tempCh}`);
       // ── Auto-push to cloud whenever signed in ──────────────────────────────
       if (state.syncUser) Sync.scheduleAutoPush();
+      closeModal();
+      renderCurrentPanel();
+    });
+    $('modal-pause')?.addEventListener('click', async () => {
+      const previous = { ...entry };
+      entry.mode = isPaused ? 'following' : 'paused';
+      MTModel.stampModeChange(entry, previous);
+      try {
+        await Storage.saveEntry(entry);
+        state.entries = await Storage.getEntries();
+        showToast(isPaused ? 'Resumed' : 'Paused');
+        if (state.syncUser) Sync.scheduleAutoPush();
+      } catch (e) { entry.mode = previous.mode; showToast(e.message, 4000); }
       closeModal();
       renderCurrentPanel();
     });
@@ -1300,6 +1500,50 @@
   }
 
   // ── Sync / Firebase ────────────────────────────────────────────────────────
+  function timeAgo(ts) {
+    if (!ts) return 'never';
+    const s = Math.round((Date.now() - ts) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+    return new Date(ts).toLocaleDateString();
+  }
+
+  // Keeps the header dot, the Settings dot and the detail line in step with
+  // the real sync state. Failures used to be silent (console only).
+  let lastSeenResult = null;
+  function updateSyncUi(st) {
+    const cls = !state.syncUser ? '' : st.state === 'ok' ? 'ok' : st.state === 'busy' ? 'busy' : st.state === 'err' ? 'err' : (st.lastSyncAt ? 'ok' : '');
+    const hdr = $('hdr-sync');
+    if (hdr) {
+      hdr.className = 'sync-dot' + (cls ? ' ' + cls : '');
+      hdr.title = !state.syncUser ? 'Sync: not signed in'
+        : st.state === 'err' ? `Sync problem: ${st.message}`
+        : st.state === 'busy' ? 'Syncing…'
+        : `Synced ${timeAgo(st.lastSyncAt)}`;
+    }
+    const detail = $('sync-detail');
+    if (detail) {
+      detail.className = 'sync-detail' + (st.state === 'err' ? ' err' : '');
+      detail.textContent = !state.syncUser ? ''
+        : st.state === 'err' ? `Last sync failed: ${st.message}. It will retry automatically.`
+        : `Last synced: ${timeAgo(st.lastSyncAt)}` +
+          (st.result && st.result.parts ? ` · ${st.result.parts} part${st.result.parts === 1 ? '' : 's'}, ${st.result.uploaded} uploaded` +
+            (st.result.strippedCovers ? ` · ${st.result.strippedCovers} very large cover(s) not synced — use Optimise covers` : '') : '');
+    }
+    // If the cloud brought in changes from another device, show them.
+    if (st.state === 'ok' && st.result && st.result !== lastSeenResult) {
+      lastSeenResult = st.result;
+      if (st.result.remoteRead) {
+        Storage.getEntries().then(es => {
+          state.entries = es;
+          updateCounts();
+          if (['today', 'library', 'sites'].includes(state.nav)) renderCurrentPanel();
+        });
+      }
+    }
+  }
+
   function renderSyncStatus() {
     const dot    = $('sync-dot');
     const label  = $('sync-label');
@@ -1315,8 +1559,9 @@
       return;
     }
 
+    const st = Sync.getStatus();
     if (state.syncUser) {
-      dot.className = 'sync-dot ok';
+      dot.className = 'sync-dot ' + (st.state === 'err' ? 'err' : st.state === 'busy' ? 'busy' : 'ok');
       label.textContent = `Signed in as ${state.syncUser}`;
       if (actBtn) { actBtn.textContent = 'Sign out'; actBtn.style.display = ''; }
       if (form)   form.style.display   = 'none';
@@ -1328,6 +1573,23 @@
       if (form)   form.style.display   = 'none';
       if (ctrls)  ctrls.style.display  = 'none';
     }
+    updateSyncUi(st);
+  }
+
+  async function runManualSync(force) {
+    const dot = $('sync-dot'), label = $('sync-label');
+    if (dot) dot.className = 'sync-dot busy';
+    if (label) label.textContent = force ? 'Full re-sync…' : 'Syncing…';
+    try {
+      const r = await Sync.syncNow({ force });
+      if (r) {
+        state.entries = await Storage.getEntries();
+        updateCounts();
+        showToast(r.uploaded ? `Synced · ${r.uploaded} part${r.uploaded === 1 ? '' : 's'} uploaded` : 'Already up to date');
+        if (['today', 'library', 'sites'].includes(state.nav)) renderCurrentPanel();
+      }
+    } catch (e) { showToast('Sync failed: ' + e.message, 7000); }
+    renderSyncStatus();
   }
 
   function wireSync() {
@@ -1335,9 +1597,6 @@
     const signinBtn = $('sync-signin-btn');
     const cancelBtn = $('sync-cancel-btn');
     const form     = $('sync-form');
-    const ctrls    = $('sync-controls');
-    const pushBtn  = $('sync-push-btn');
-    const pullBtn  = $('sync-pull-btn');
     if (!actBtn) return;
 
     actBtn.addEventListener('click', () => {
@@ -1365,45 +1624,18 @@
       if (label) label.textContent = 'Signing in…';
       try {
         await Sync.login(email);
-        state.syncUser = email;
+        state.syncUser = Sync.getEmail();
         showToast('Signed in');
         renderSyncStatus();
+        runManualSync(false);          // first sync merges the cloud copy with this device
       } catch(e) {
-        showToast('Sign in failed: ' + e.message);
+        showToast('Sign in failed: ' + e.message, 5000);
         renderSyncStatus();
       }
     });
 
-    pushBtn?.addEventListener('click', async () => {
-      const dot = $('sync-dot');
-      const label = $('sync-label');
-      if (dot) dot.className = 'sync-dot busy';
-      if (label) label.textContent = 'Pushing…';
-      try {
-        await Sync.push(state.entries, state.settings);
-        showToast('Library pushed to cloud');
-      } catch(e) { showToast('Push failed: ' + e.message); }
-      renderSyncStatus();
-    });
-
-    pullBtn?.addEventListener('click', async () => {
-      const dot = $('sync-dot');
-      const label = $('sync-label');
-      if (dot) dot.className = 'sync-dot busy';
-      if (label) label.textContent = 'Pulling…';
-      try {
-        const remote = await Sync.pull();
-        if (remote && remote.entries) {
-          for (const e of remote.entries) await Storage.saveEntry(e);
-          state.entries = await Storage.getEntries();
-          showToast(`Pulled ${remote.entries.length} entries`);
-          renderCurrentPanel();
-        } else {
-          showToast('Nothing found in cloud');
-        }
-      } catch(e) { showToast('Pull failed: ' + e.message); }
-      renderSyncStatus();
-    });
+    $('sync-now-btn')?.addEventListener('click',  () => runManualSync(false));
+    $('sync-full-btn')?.addEventListener('click', () => runManualSync(true));
   }
 
   // ── Settings ───────────────────────────────────────────────────────────────
@@ -1428,6 +1660,7 @@
       await Storage.saveSettings(state.settings);
       if (state.syncUser) Sync.scheduleAutoPush();
     });
+    $('optimise-btn')?.addEventListener('click', optimiseCovers);
     $('export-btn')?.addEventListener('click',  exportData);
     $('import-btn')?.addEventListener('click',  () => $('import-file')?.click());
     $('import-file')?.addEventListener('change', importData);
@@ -1449,13 +1682,59 @@
     try {
       const data = JSON.parse(await file.text());
       if (data.entries) {
-        for (const entry of data.entries) await Storage.saveEntry(entry);
+        // One write for the whole file (the old loop rewrote the entire
+        // library once per entry — painfully slow with a big import).
+        const changed = await Storage.saveMany(data.entries);
         state.entries = await Storage.getEntries();
-        showToast(`Imported ${data.entries.length} entries`);
+        showToast(`Imported ${data.entries.length} entries (${changed} new or newer)`);
+        if (state.syncUser) Sync.scheduleAutoPush();
         renderCurrentPanel();
       }
-    } catch { showToast('Import failed — invalid file'); }
+    } catch (err) { showToast('Import failed — ' + (err && err.message ? err.message : 'invalid file'), 5000); }
     e.target.value = '';
+  }
+
+  // ── Library size & cover optimiser ────────────────────────────────────────
+  const fmtBytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+
+  function updateLibSize() {
+    const el = $('lib-size');
+    if (!el) return;
+    const covers = state.entries.reduce((n, e) => n + (e.imageData ? e.imageData.length : 0), 0);
+    const total = state.entries.length;
+    let text = `${total} ${total === 1 ? 'title' : 'titles'} · covers ${fmtBytes(covers)}`;
+    const big = state.entries.filter(e => e.imageData && e.imageData.length > 40000).length;
+    if (big) text += ` · ${big} large (optimise to speed things up)`;
+    el.textContent = text;
+  }
+
+  async function optimiseCovers() {
+    const btn = $('optimise-btn');
+    const targets = state.entries.filter(e => e.imageData && e.imageData.length > 30000);
+    if (!targets.length) { showToast('Covers are already small'); return; }
+    if (btn) btn.disabled = true;
+    let before = 0, after = 0;
+    const updated = [];
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const e = targets[i];
+        if (i % 5 === 0) showToast(`Optimising covers… ${i}/${targets.length}`, 1500);
+        const small = await shrinkImage(e.imageData);
+        before += e.imageData.length;
+        if (small.length < e.imageData.length) { after += small.length; updated.push({ ...e, imageData: small, updatedAt: Date.now() }); }
+        else after += e.imageData.length;
+      }
+      if (updated.length) await Storage.saveMany(updated);
+      state.entries = await Storage.getEntries();
+      showToast(`Optimised ${updated.length} covers: ${fmtBytes(before)} → ${fmtBytes(after)}`, 5000);
+      if (updated.length && state.syncUser) Sync.scheduleAutoPush();
+    } catch (err) {
+      showToast('Optimise failed: ' + err.message, 5000);
+    } finally {
+      if (btn) btn.disabled = false;
+      updateLibSize();
+      renderCurrentPanel();
+    }
   }
 
   // ── Close sidebar ──────────────────────────────────────────────────────────
@@ -1519,19 +1798,29 @@
     // Edit flags — prevent auto-detection from overwriting manual input
     $('f-title')?.addEventListener('input',   () => { $('f-title').dataset.edited   = '1'; });
     $('f-chapter')?.addEventListener('input', () => { $('f-chapter').dataset.edited = '1'; });
-    // Library filters
+    // Library filters — typing is debounced so a big library isn't redrawn on every keystroke
+    let searchTimer = null;
     $('lib-search')?.addEventListener('input', e => {
-      state.libSearch = e.target.value;
-      renderLibraryAll(); renderLibrarySite();
+      clearTimeout(searchTimer);
+      const v = e.target.value;
+      searchTimer = setTimeout(() => { state.libSearch = v; state.libShown = PAGE_SIZE; renderLibrary(); }, 150);
     });
     $('lib-type-filter')?.addEventListener('change', e => {
-      state.libTypeFilter = e.target.value;
-      renderLibraryAll(); renderLibrarySite();
+      state.libTypeFilter = e.target.value; state.libShown = PAGE_SIZE; renderLibrary();
     });
     $('lib-status-filter')?.addEventListener('change', e => {
-      state.libStatusFilter = e.target.value;
-      renderLibraryAll(); renderLibrarySite();
+      state.libStatusFilter = e.target.value; state.libShown = PAGE_SIZE; renderLibrary();
     });
+    // Choosing a type yourself stops auto-detection from changing it
+    $('f-type')?.addEventListener('change', () => { $('f-type').dataset.edited = '1'; if ($('detect-type')) $('detect-type').textContent = ''; });
+    // Monthly: same date vs irregular
+    document.querySelectorAll('#monthly-chips .fchip').forEach(btn =>
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#monthly-chips .fchip').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        if ($('monthly-date')) $('monthly-date').style.display = btn.dataset.mfreq === '0' ? 'none' : '';
+      })
+    );
     // Modal backdrop close
     $('detail-modal')?.addEventListener('click', e => {
       if (e.target === $('detail-modal')) closeModal();
@@ -1556,17 +1845,33 @@
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
+  // Fill the type dropdowns from the shared list (so the extension and the web
+  // app always offer the same types).
+  function populateTypeSelects() {
+    const form = $('f-type');
+    if (form) form.innerHTML = MTModel.TYPES.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
+    const filter = $('lib-type-filter');
+    if (filter) filter.insertAdjacentHTML('beforeend', MTModel.TYPES.map(t => `<option value="${t.id}">${t.label}</option>`).join(''));
+  }
+
   async function init() {
+    populateTypeSelects();
     await loadAll();
     wireStaticEvents();
     setupSettings();
-    // Try to restore sync session silently
-    try {
-      const session = await Sync.restoreSession();
-      if (session) state.syncUser = session.email;
-    } catch(_) {}
+    Sync.onStatus(updateSyncUi);
+    updateCounts();
 
-    switchNav('add');
+    switchNav('add');                      // first paint happens now — nothing below blocks it
+
+    // Cloud sync starts in the background. The old code waited for a network
+    // sign-in *before* drawing anything, which is what made opening feel stuck.
+    Sync.restoreSession().then(session => {
+      if (!session) return;
+      state.syncUser = session.email;
+      renderSyncStatus();
+      setTimeout(() => Sync.syncNow().catch(() => {}), 1200);   // picks up changes from your phone, and any unsynced edits
+    }).catch(() => {});
   }
 
   init();

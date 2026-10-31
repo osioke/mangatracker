@@ -37,7 +37,85 @@
     const hostname = location.hostname.replace(/^www\./, '');
     const genres = detectGenres();
 
-    return { title, image, url: location.href, hostname, genres, chapter: detectChapter() };
+    // Work out what kind of series this is (manga / manhwa / anime …).
+    // Never allowed to break the rest of the page info if it throws.
+    let type = null, typeConfidence = 'none';
+    try {
+      if (typeof MTDetect !== 'undefined') {
+        const det = MTDetect.detectType(buildSnapshot());
+        type = det.type; typeConfidence = det.confidence;
+      }
+    } catch (e) { console.warn('[MangaTracker] type detection failed:', e); }
+
+    return { title, image, url: location.href, hostname, genres, chapter: detectChapter(), type, typeConfidence };
+  }
+
+  // ── Type detection: gather clues from the page (see shared/mt-detect.js) ──
+  function collectLabelPairs() {
+    const pairs = [];
+    const push = (k, v) => { k = (k || '').trim(); v = (v || '').trim(); if (k && v && k.length <= 30 && v.length <= 60) pairs.push([k.replace(/[:：]$/, ''), v]); };
+    // "Type: Manhwa" inside one element
+    document.querySelectorAll('li, tr, p, .info-item, .imptdt, [class*="info"] > *, [class*="meta"] > *')
+      .forEach((el, i) => {
+        if (i > 600) return;
+        const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+        if (!t || t.length > 90) return;
+        let m = t.match(/^([A-Za-z ]{2,24})\s*[:：]\s*(.{1,60})$/);
+        if (m) return push(m[1], m[2]);
+        // "Type Manhwa" (label and value separated only by markup)
+        m = t.match(/^(type|format|country|origin|category)\s+(.{1,40})$/i);
+        if (m) push(m[1], m[2]);
+      });
+    // <dt>Type</dt><dd>Manhwa</dd>  and  <th>Type</th><td>Manhwa</td>
+    document.querySelectorAll('dt, th').forEach((el, i) => {
+      if (i > 200) return;
+      const next = el.nextElementSibling;
+      if (next && /^(DD|TD)$/.test(next.tagName)) push(el.textContent, next.textContent);
+    });
+    return pairs;
+  }
+
+  function collectJsonLdTypes() {
+    const out = [];
+    const walk = n => {
+      if (!n || typeof n !== 'object') return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n['@type']) [].concat(n['@type']).forEach(t => out.push(String(t)));
+      if (n['@graph']) walk(n['@graph']);
+    };
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(sc => {
+      try { walk(JSON.parse(sc.textContent)); } catch (_) {}
+    });
+    return out;
+  }
+
+  function buildSnapshot() {
+    const hrefs = [...document.querySelectorAll(
+      '.genres a, .genre a, .tags a, .tag a, .categories a, [rel="tag"], [class*="breadcrumb"] a, [class*="genre"] a, [class*="type"] a'
+    )].slice(0, 60).map(a => a.getAttribute('href') || '');
+
+    const hasVideo = !!document.querySelector('video') ||
+      [...document.querySelectorAll('iframe')].some(f => /player|embed|stream|video|mp4upload|filemoon|vidstream/i.test(f.src || ''));
+
+    let tallImages = 0, pageImages = 0;
+    [...document.images].slice(0, 200).forEach(img => {
+      const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+      if (w < 300 || !h) return;
+      const ratio = h / w;
+      if (ratio >= 2.5) tallImages++; else if (ratio >= 1.2 && ratio <= 1.8) pageImages++;
+    });
+
+    return {
+      url: location.href,
+      hostname: location.hostname.replace(/^www\./, ''),
+      title: document.querySelector('meta[property="og:title"]')?.content || document.title || '',
+      ogType: document.querySelector('meta[property="og:type"]')?.content || '',
+      jsonLdTypes: collectJsonLdTypes(),
+      labelPairs: collectLabelPairs(),
+      anchorHrefs: hrefs,
+      bodyText: (document.body?.innerText || '').slice(0, 3000),
+      hasVideo, tallImages, pageImages,
+    };
   }
 
   function detectChapter() {
@@ -216,6 +294,8 @@
           hostname: location.hostname.replace(/^www\./, ''),
           genres: [],
           chapter: null,
+          type: null,
+          typeConfidence: 'none',
         });
       }
       return true;

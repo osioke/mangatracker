@@ -1,189 +1,171 @@
 /**
- * MangaTracker — Firebase Sync
+ * MangaTracker — cloud sync for the extension.
  *
- * Uses the Firestore REST API directly (no npm, no bundler, works in extensions).
+ * The heavy lifting (splitting the library into Firestore-sized parts,
+ * merging, token refresh) lives in shared/mt-cloud.js. This file adds what
+ * is specific to the extension:
+ *   • remembers whether there are unsynced changes (survives closing the panel)
+ *   • debounced automatic sync after every change
+ *   • retries with back-off when the network or Firestore fails
+ *   • reports status so the UI can show it instead of failing silently
+ *
+ * Put your own Firebase keys below.
  */
-
 const FirebaseConfig = {
   apiKey:    'AIzaSyB38aVbF-2p7jxiXEiR2eQkv1b2FIbyEj0',
   projectId: 'mangatracker-15917',
 };
 
 const Sync = (() => {
-  const BASE      = `https://firestore.googleapis.com/v1/projects/${FirebaseConfig.projectId}/databases/(default)/documents`;
-  const AUTH_BASE = `https://identitytoolkit.googleapis.com/v1`;
+  const AUTO_DELAY = 1500;                       // wait for edits to settle
+  const RETRY_DELAYS = [30e3, 120e3, 600e3];     // 30 s, 2 min, 10 min
 
-  let _idToken  = null;
-  let _uid      = null;
-  let _email    = null;
+  const chromeGet = keys => new Promise(r => chrome.storage.local.get(keys, r));
+  const chromeSet = obj  => new Promise(r => chrome.storage.local.set(obj, r));
+  const chromeRemove = keys => new Promise(r => chrome.storage.local.remove(keys, r));
 
-  // ── Auto-push debounce ────────────────────────────────────────────────────
-  // Waits 1.5 seconds after the last change before pushing, so rapid edits
-  // don't hammer Firestore with a push on every single keystroke.
-  let _autoPushTimer = null;
-  function scheduleAutoPush() {
-    clearTimeout(_autoPushTimer);
-    _autoPushTimer = setTimeout(async () => {
-      try {
-        const stored = await new Promise(resolve =>
-          chrome.storage.local.get(['mt_entries', 'mt_settings', 'mt_sync_dockey'], resolve)
-        );
-        if (!stored.mt_sync_dockey) return; // not signed in, skip silently
-        const entries  = stored.mt_entries  || [];
-        const settings = stored.mt_settings || {};
-        await push(entries, settings);
-        console.log('[MangaTracker] Auto-pushed to cloud ✓');
-      } catch (e) {
-        console.warn('[MangaTracker] Auto-push failed:', e.message);
-        // Fail silently — user can always push manually from Settings
-      }
-    }, 1500);
+  const isConfigured = () =>
+    FirebaseConfig.apiKey !== 'YOUR_API_KEY' && FirebaseConfig.projectId !== 'YOUR_PROJECT_ID';
+
+  // Login tokens are kept so reopening the panel doesn't create a new
+  // anonymous Firebase user every time (it used to, and waited on the network).
+  const client = MTCloud.createClient({
+    apiKey: FirebaseConfig.apiKey,
+    projectId: FirebaseConfig.projectId,
+    tokenStore: {
+      load: async () => (await chromeGet(['mt_sync_token'])).mt_sync_token || null,
+      save: t => chromeSet({ mt_sync_token: t }),
+    },
+  });
+
+  let _email = null, _docKey = null;
+  let _timer = null, _retryTimer = null, _retryStep = 0;
+  let _running = false, _changeSeq = 0;
+  let _status = { state: 'idle', message: '', lastSyncAt: null, lastError: null };
+  const _listeners = [];
+
+  function setStatus(patch) {
+    _status = { ..._status, ...patch };
+    _listeners.forEach(fn => { try { fn(_status); } catch (_) {} });
   }
+  const onStatus = fn => { _listeners.push(fn); fn(_status); };
 
-  function isConfigured() {
-    return FirebaseConfig.apiKey !== 'YOUR_API_KEY' &&
-           FirebaseConfig.projectId !== 'YOUR_PROJECT_ID';
-  }
-
-  // ── Anonymous sign-in via Firebase Auth REST ──────────────────────────────
-  async function signInAnonymously() {
-    const r = await fetch(`${AUTH_BASE}/accounts:signUp?key=${FirebaseConfig.apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnSecureToken: true })
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      const code = data.error?.message || 'AUTH_FAILED';
-      // Translate the most common Firebase error codes into plain English
-      if (code === 'CONFIGURATION_NOT_FOUND')
-        throw new Error('Firebase: Anonymous sign-in is not enabled. Go to Firebase Console → Authentication → Sign-in method → enable Anonymous.');
-      if (code === 'API_KEY_INVALID' || code.includes('API_KEY'))
-        throw new Error('Firebase: API key is invalid. Check the apiKey value in src/firebase.js.');
-      if (code === 'OPERATION_NOT_ALLOWED')
-        throw new Error('Firebase: Anonymous auth is disabled. Enable it in Firebase Console → Authentication → Sign-in method.');
-      throw new Error(`Firebase auth error: ${code}`);
-    }
-    _idToken = data.idToken;
-    _uid     = data.localId;
-    return data;
-  }
-
-  // ── Derive a document key from just an email ──────────────────────────────
-  // NOTE ON SECURITY: there is no password here. Anyone who knows this email
-  // address can sign in as "you" and read/write this library — the Firestore
-  // rules (see README) allow any authenticated user to access any document
-  // once they know its key, and this key is now a direct hash of a
-  // often-guessable/public identifier rather than a private phrase. That's a
-  // deliberate trade-off for a low-stakes reading list, not an oversight.
+  // No password: the library key is a hash of the email (see README → Security).
   async function makeDocKey(email) {
-    const raw = email.toLowerCase().trim();
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
-    const hex = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
-    return hex.slice(0, 32);
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.toLowerCase().trim()));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
   }
-
-  function isValidEmail(email) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  }
-
-  // ── Firestore REST helpers ────────────────────────────────────────────────
-  function toFirestoreDoc(obj) {
-    return { fields: { data: { stringValue: JSON.stringify(obj) } } };
-  }
-
-  function fromFirestoreDoc(doc) {
-    try { return JSON.parse(doc.fields?.data?.stringValue || 'null'); }
-    catch { return null; }
-  }
-
-  async function fsGet(docPath) {
-    const r = await fetch(`${BASE}/${docPath}`, {
-      headers: { 'Authorization': `Bearer ${_idToken}` }
-    });
-    if (r.status === 404) return null;
-    if (!r.ok) throw new Error(`Firestore GET failed: ${r.status}`);
-    return fromFirestoreDoc(await r.json());
-  }
-
-  async function fsSet(docPath, obj) {
-    const r = await fetch(`${BASE}/${docPath}`, {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${_idToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(toFirestoreDoc(obj))
-    });
-    if (!r.ok) throw new Error(`Firestore SET failed: ${r.status}`);
-    return r.json();
-  }
-
-  // ── Public API ────────────────────────────────────────────────────────────
+  const isValidEmail = email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   async function login(email) {
-    if (!isConfigured()) throw new Error('Firebase not configured. See src/firebase.js.');
+    if (!isConfigured()) throw new Error('Firebase not configured. See README.');
     if (!email || !isValidEmail(email)) throw new Error('Enter a valid email address.');
-    await signInAnonymously();
-    const docKey = await makeDocKey(email);
-    _email       = email.toLowerCase().trim();
-    await new Promise(resolve => chrome.storage.local.set({
-      mt_sync_dockey: docKey,
-      mt_sync_email:  _email,
-    }, resolve));
-    return { email: _email, docKey };
+    await client.ensureToken(false);             // proves the Firebase project is reachable
+    _email = email.toLowerCase().trim();
+    _docKey = await makeDocKey(_email);
+    await chromeSet({ mt_sync_dockey: _docKey, mt_sync_email: _email });
+    // First sync merges whatever is already in the cloud with this device.
+    await Storage.setDirty(true);
+    return { email: _email, docKey: _docKey };
   }
 
+  // Local only — no network. (The old version signed in to Firebase here and
+  // the panel waited for it before showing anything.)
   async function restoreSession() {
     if (!isConfigured()) return false;
-    const data = await new Promise(resolve =>
-      chrome.storage.local.get(['mt_sync_dockey','mt_sync_email'], resolve)
-    );
-    if (!data.mt_sync_dockey) return false;
-    try {
-      await signInAnonymously();
-      _email = data.mt_sync_email;
-      return { email: _email, docKey: data.mt_sync_dockey };
-    } catch {
-      return false;
-    }
+    const d = await chromeGet(['mt_sync_dockey', 'mt_sync_email']);
+    if (!d.mt_sync_dockey) return false;
+    _docKey = d.mt_sync_dockey; _email = d.mt_sync_email;
+    const meta = await Storage.getSyncMeta();
+    setStatus({ lastSyncAt: meta.lastSyncAt || null, lastError: meta.lastError || null });
+    return { email: _email, docKey: _docKey };
   }
 
   async function logout() {
-    _idToken = null; _uid = null; _email = null;
-    clearTimeout(_autoPushTimer);
-    await new Promise(resolve =>
-      chrome.storage.local.remove(['mt_sync_dockey','mt_sync_email'], resolve)
-    );
+    clearTimeout(_timer); clearTimeout(_retryTimer);
+    _email = null; _docKey = null; _retryStep = 0;
+    await chromeRemove(['mt_sync_dockey', 'mt_sync_email', 'mt_sync_token', Storage.KEYS.syncMeta, Storage.KEYS.dirty]);
+    setStatus({ state: 'idle', message: '', lastSyncAt: null, lastError: null });
   }
 
-  async function push(entries, settings) {
-    const data = await new Promise(resolve =>
-      chrome.storage.local.get(['mt_sync_dockey'], resolve)
-    );
-    if (!data.mt_sync_dockey) throw new Error('Not signed in');
-    // Re-authenticate if token has expired (anonymous tokens last ~1 hour)
-    if (!_idToken) await signInAnonymously();
-    await fsSet(`mt_users/${data.mt_sync_dockey}`, {
-      entries,
-      settings,
-      pushedAt: Date.now(),
-      email: _email
-    });
+  /**
+   * Two-way sync right now. Safe to call at any time; overlapping calls are
+   * queued rather than run in parallel.
+   */
+  async function syncNow({ force = false } = {}) {
+    if (!_docKey) throw new Error('Not signed in');
+    if (_running) { _changeSeq++; return null; }   // the running sync will loop once more
+    _running = true;
+    setStatus({ state: 'busy', message: 'Syncing…' });
+    try {
+      const seqAtStart = _changeSeq;
+      // Nothing to send and the cloud hasn't changed? One tiny request, no
+      // heavy work — this is what runs every time the panel opens.
+      if (!force && !(await Storage.isDirty())) {
+        const known = (await Storage.getSyncMeta()).lastRemoteRev;
+        const rev = await client.peek(_docKey);
+        if (rev && rev === known) {
+          const lastSyncAt = Date.now();
+          await Storage.setSyncMeta({ lastSyncAt, lastError: null });
+          setStatus({ state: 'ok', message: 'Up to date', lastSyncAt, lastError: null, result: { entries: null, uploaded: 0, parts: 0, remoteRead: false, rev } });
+          return _status.result;
+        }
+      }
+      const entries = await Storage.getEntries();
+      const tombstones = await Storage.getTombstones();
+      const hadSettings = await Storage.hasStoredSettings();
+      const settings = hadSettings ? await Storage.getSettings() : null;
+      const meta = await Storage.getSyncMeta();
+
+      const r = await client.sync(_docKey, { entries, tombstones, settings }, { lastRemoteRev: meta.lastRemoteRev, force });
+
+      if (r.remoteRead) {
+        // Re-merge against what is on disk *now*, so an edit made while the
+        // network call was in flight is not overwritten.
+        const merged = MTCloud.mergeLibraries(
+          { entries: await Storage.getEntries(), tombstones: await Storage.getTombstones() },
+          { entries: r.entries, tombstones: r.tombstones });
+        await Storage.replaceAll(merged.entries, merged.tombstones);
+      }
+      if (!hadSettings && r.remoteSettings) await Storage.saveSettings({ ...(await Storage.getSettings()), ...r.remoteSettings });
+
+      const lastSyncAt = Date.now();
+      await Storage.setSyncMeta({ lastRemoteRev: r.rev, lastSyncAt, lastError: null });
+      if (_changeSeq === seqAtStart) await Storage.setDirty(false);
+      _retryStep = 0; clearTimeout(_retryTimer);
+      setStatus({ state: 'ok', message: 'Synced', lastSyncAt, lastError: null, result: r });
+      return r;
+    } catch (e) {
+      await Storage.setSyncMeta({ lastError: e.message });
+      setStatus({ state: 'err', message: e.message, lastError: e.message });
+      scheduleRetry();
+      throw e;
+    } finally {
+      _running = false;
+      if (_changeSeq > 0 && await Storage.isDirty() && _status.state === 'ok') scheduleAutoPush();
+    }
   }
 
-  async function pull() {
-    const data = await new Promise(resolve =>
-      chrome.storage.local.get(['mt_sync_dockey'], resolve)
-    );
-    if (!data.mt_sync_dockey) throw new Error('Not signed in');
-    if (!_idToken) await signInAnonymously();
-    const remote = await fsGet(`mt_users/${data.mt_sync_dockey}`);
-    return remote; // { entries, settings, pushedAt }
+  function scheduleRetry() {
+    clearTimeout(_retryTimer);
+    if (_retryStep >= RETRY_DELAYS.length) return;      // give up until the next change or panel open
+    _retryTimer = setTimeout(() => { syncNow().catch(() => {}); }, RETRY_DELAYS[_retryStep++]);
   }
 
-  function getEmail()       { return _email; }
-  function configured()     { return isConfigured(); }
+  // Call after any change. The "unsynced changes" flag is stored first, so
+  // even if the panel closes before the timer fires, the next open finishes the job.
+  function scheduleAutoPush() {
+    if (!_docKey) return;
+    _changeSeq++;
+    Storage.setDirty(true);
+    clearTimeout(_timer);
+    _timer = setTimeout(() => { syncNow().catch(e => console.warn('[MangaTracker] auto-sync failed:', e.message)); }, AUTO_DELAY);
+  }
 
-  return { login, logout, restoreSession, push, pull, getEmail, configured, scheduleAutoPush };
+  function estimate(entries) { return MTCloud.estimate(entries); }
+
+  return {
+    login, logout, restoreSession, syncNow, scheduleAutoPush, onStatus, estimate,
+    getStatus: () => _status, getEmail: () => _email, configured: isConfigured,
+  };
 })();

@@ -6,5 +6,6 @@ Genre list should be searchable alongside how it currently shows.
 A status and/or mode for a series that is completed, but I am reading but paused on to read or do something else
 The extension sometimes feels heavy to open in that it acts like it is hanging or loading when I open it, maybe it is because I have a lot of entries now?
 Total number of entries should be shown somewhere
-The project is ciurrently in 2 repos mangatracker (https://github.com/osioke/mangatracker/) and mangatracker-web (https://github.com/osioke/mangatracker-web/), I want to merge them both to be or use just one repo mangatracker, would this be possible? I shared both of them.
+The project is ciurrently in 2 repos mangatracker (https://github.com/osioke/mangatracker/) and mangatracker-web (https://github.com/osioke/mangatracker-web/), I want to merge them both to be or use just one repo mangatracker, would this be possible? I shared both of them in the zip.
+Improve the readme for the single project now, so it is readable and usable by both non-technical and technical people
 Ideas and thoughts about some intelligence in filtering and presenting? I have quite a list and I've been thinking the app/site should have some sort of intelligence to it or in it, what do you think?
