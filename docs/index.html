@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MangaTracker</title>
+<style>
+/* Bundled locally — no round-trip to Google Fonts before the page can draw. */
+@font-face{font-family:'JetBrains Mono';font-weight:400;font-style:normal;font-display:swap;src:url('fonts/jetbrains-mono-latin-400-normal.woff2') format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-weight:500;font-style:normal;font-display:swap;src:url('fonts/jetbrains-mono-latin-500-normal.woff2') format('woff2')}
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0f12; --bg2:#13161b; --bg3:#1a1e25; --bg4:#20252e;
+  --line:#ffffff12; --line2:#ffffff20; --line3:#ffffff30;
+  --acc:#7c6af7; --acc2:#9d8fff;
+  --txt:#e8eaf0; --txt2:#a3a9c0; --txt3:#868ca6;   /* both pass WCAG AA (4.5:1) on every background */
+  --green:#3ecf8e; --amber:#f0a04b; --red:#e06b6b;
+  --font:'JetBrains Mono',ui-monospace,monospace;
+  --r:6px; --maxw:720px;
+}
+html,body{background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;min-height:100vh}
+
+/* ── Layout ── */
+.topbar{background:var(--bg2);border-bottom:1px solid var(--line);padding:12px 20px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:50}
+.logo{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--txt3);flex:1}
+.logo span{color:var(--acc2)}
+.sync-chip{display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.06em;color:var(--txt3)}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--txt3)}
+.sync-dot.ok{background:var(--green)} .sync-dot.busy{background:var(--amber);animation:pulse 1s infinite} .sync-dot.err{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.page{max-width:var(--maxw);margin:0 auto;padding:24px 20px}
+
+/* ── Auth card ── */
+.auth-wrap{max-width:360px;margin:60px auto}
+.card{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:24px}
+.card-title{font-size:13px;letter-spacing:.06em;color:var(--txt);margin-bottom:4px}
+.card-sub{font-size:10px;color:var(--txt3);letter-spacing:.04em;margin-bottom:20px}
+.field{margin-bottom:12px}
+.flabel{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt3);display:block;margin-bottom:5px}
+.finput{width:100%;background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r);padding:8px 10px;color:var(--txt);font-family:var(--font);font-size:12px;outline:none;transition:border-color .12s}
+.finput:focus{border-color:var(--acc)}
+.fsel{width:100%;background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r);padding:8px 10px;color:var(--txt);font-family:var(--font);font-size:12px;outline:none;cursor:pointer}
+.savebtn{width:100%;padding:10px;border-radius:var(--r);border:none;cursor:pointer;font-family:var(--font);font-size:10px;letter-spacing:.14em;text-transform:uppercase;background:var(--acc);color:#fff;transition:opacity .12s;margin-top:4px}
+.savebtn:hover{opacity:.85} .savebtn:disabled{opacity:.4;cursor:not-allowed}
+.err-msg{font-size:10px;color:var(--red);margin-top:8px;letter-spacing:.04em;display:none}
+
+/* ── Nav tabs ── */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);margin-bottom:20px;background:var(--bg2);border-radius:8px 8px 0 0;overflow:hidden}
+.tab{flex:1;text-align:center;padding:9px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--txt3);cursor:pointer;border:none;background:none;font-family:var(--font);border-bottom:2px solid transparent;transition:all .12s;margin-bottom:-1px}
+.tab:hover{color:var(--txt2)} .tab.active{color:var(--acc2);border-bottom-color:var(--acc)}
+
+/* ── Panels ── */
+.panel{display:none} .panel.active{display:block}
+
+/* ── Library controls ── */
+.libctrl{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.searchbox{flex:1;min-width:140px;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r);padding:7px 10px 7px 32px;color:var(--txt);font-family:var(--font);font-size:12px;outline:none;transition:border-color .12s}
+.searchbox:focus{border-color:var(--acc)}
+.swrap{position:relative;flex:1;min-width:140px}
+.swrap .si{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--txt3);font-size:14px;pointer-events:none}
+.fsel-sm{background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r);padding:6px 10px;color:var(--txt2);font-family:var(--font);font-size:11px;outline:none;cursor:pointer}
+.add-btn-top{padding:7px 14px;border-radius:var(--r);border:1px solid var(--acc);background:transparent;color:var(--acc2);font-family:var(--font);font-size:10px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;transition:all .12s;white-space:nowrap}
+.add-btn-top:hover{background:var(--acc);color:#fff}
+
+/* ── Entry grid ── */
+.entry-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.ecard{background:var(--bg2);border:1px solid var(--line2);border-radius:8px;overflow:hidden;cursor:pointer;transition:border-color .12s}
+.ecard:hover{border-color:var(--line3)}
+.ecard-art{width:100%;aspect-ratio:3/4;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:32px;position:relative;overflow:hidden}
+.ecard-art img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.ecard-body{padding:9px}
+.ecard-title{font-size:11px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+.ecard-meta{font-size:9px;color:var(--txt3);margin-top:3px;letter-spacing:.04em}
+.ecard-ch{font-size:12px;color:var(--acc2);margin-top:4px;letter-spacing:.04em}
+.stag{display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;margin-top:3px;letter-spacing:.06em}
+.stag-on{background:#7c6af718;color:var(--acc2);border:1px solid #7c6af730}
+.stag-cook{background:#f0a04b14;color:var(--amber);border:1px solid #f0a04b28}
+.stag-done{background:#ffffff08;color:var(--txt3);border:1px solid var(--line2)}
+.stag-pause{background:#4fb3d914;color:#4fb3d9;border:1px solid #4fb3d930}
+.stag-drop{background:#e06b6b14;color:var(--red);border:1px solid #e06b6b28}
+
+/* ── Schedule ── */
+.week-grid{display:flex;flex-direction:column;gap:0}
+.day-block{border-bottom:1px solid var(--line)}
+.day-head{padding:8px 0;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt3);display:flex;justify-content:space-between}
+.day-today .day-head{color:var(--acc2)}
+.day-entries{display:flex;flex-direction:column;gap:0}
+.srow{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}
+.srow:hover .srow-title{color:var(--acc2)}
+.srow-art{width:28px;height:38px;border-radius:3px;background:var(--bg3);border:1px solid var(--line2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:14px;overflow:hidden;position:relative}
+.srow-art img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.srow-title{font-size:12px;color:var(--txt);flex:1;transition:color .1s;letter-spacing:.02em}
+.srow-ch{font-size:11px;color:var(--txt3)}
+
+/* ── Sites ── */
+.site-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.site-card{background:var(--bg2);border:1px solid var(--line2);border-radius:8px;padding:12px}
+.site-icon{width:24px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;margin-bottom:7px}
+.site-name{font-size:11px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.site-cnt{font-size:10px;color:var(--acc2);margin-top:4px}
+
+/* ── Modal ── */
+.modal-bg{display:none;position:fixed;inset:0;background:#00000099;z-index:100;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto}
+.modal-bg.open{display:flex}
+.modal{background:var(--bg);border:1px solid var(--line2);border-radius:10px;width:100%;max-width:440px}
+.modal-header{display:flex;align-items:flex-start;gap:12px;padding:16px;border-bottom:1px solid var(--line)}
+.modal-art{width:56px;height:76px;border-radius:5px;background:var(--bg3);border:1px solid var(--line2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;position:relative}
+.modal-art img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
+.modal-info{flex:1;min-width:0}
+.modal-title{font-size:14px;color:var(--txt);word-break:break-word}
+.modal-site{font-size:10px;color:var(--txt3);margin-top:3px}
+.modal-close{background:none;border:1px solid var(--line2);border-radius:var(--r);padding:4px 8px;color:var(--txt3);cursor:pointer;font-size:16px;flex-shrink:0}
+.modal-close:hover{color:var(--txt2)}
+.modal-body{padding:16px}
+.mstat{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px}
+.mstat-card{background:var(--bg2);border-radius:var(--r);padding:9px;border:1px solid var(--line)}
+.mstat-label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--txt3);margin-bottom:3px}
+.mstat-val{font-size:13px;color:var(--txt)}
+.mtags{font-size:9px;color:var(--txt3);letter-spacing:.06em;margin-bottom:10px}
+.mnotes{font-size:10px;color:var(--txt3);line-height:1.6;padding-top:10px;border-top:1px solid var(--line);margin-top:10px}
+.mact-row{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.mact{flex:1;padding:7px;border-radius:var(--r);border:1px solid var(--line2);background:none;color:var(--txt2);font-family:var(--font);font-size:10px;letter-spacing:.06em;cursor:pointer;text-transform:uppercase;transition:all .12s;white-space:nowrap}
+.mact:hover{border-color:var(--line3);color:var(--txt)}
+.mact.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+.mact.primary:hover{opacity:.85}
+.mact.danger{border-color:#e06b6b40;color:var(--red)}
+.mact.danger:hover{background:#e06b6b18}
+
+/* ── Chapter control ── */
+.ch-ctrl{display:flex;align-items:center;gap:8px;margin-bottom:14px;background:var(--bg2);border:1px solid var(--line2);border-radius:var(--r);padding:10px 12px}
+.ch-ctrl .ch-label{font-size:10px;color:var(--txt3);letter-spacing:.08em;flex:1}
+.ch-ctrl .ch-num{font-size:18px;color:var(--acc2);min-width:40px;text-align:center}
+.ch-btn{background:none;border:1px solid var(--line2);border-radius:var(--r);color:var(--txt2);font-size:16px;width:30px;height:30px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .12s}
+.ch-btn:hover{border-color:var(--acc);color:var(--acc2)}
+
+/* ── Add/Edit form ── */
+.form-section{background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:20px;margin-bottom:16px}
+.form-section-title{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--txt3);margin-bottom:14px}
+.pills-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.pill{padding:4px 10px;border-radius:20px;border:1px solid var(--line2);background:none;color:var(--txt3);font-family:var(--font);font-size:10px;cursor:pointer;transition:all .12s;letter-spacing:.04em}
+.pill.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.pill:hover{border-color:var(--line3);color:var(--txt2)}
+.pill.on:hover{opacity:.85}
+
+/* ── Empty ── */
+.empty{text-align:center;padding:60px 20px;color:var(--txt3);font-size:11px;letter-spacing:.06em}
+.empty-icon{font-size:36px;margin-bottom:14px}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--bg3);border:1px solid var(--line2);border-radius:var(--r);padding:8px 16px;font-size:10px;letter-spacing:.08em;color:var(--txt2);opacity:0;transition:all .2s;pointer-events:none;white-space:nowrap;z-index:300}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── Counts, paging, genre search ── */
+.hchip{font-size:10px;color:var(--txt2);letter-spacing:.06em}
+.libcount{font-size:10px;color:var(--txt3);letter-spacing:.04em;margin:-4px 0 12px}
+.morebtn{display:block;width:100%;margin:10px 0 4px;padding:8px;border-radius:var(--r);border:1px dashed var(--line2);background:none;color:var(--txt2);font-family:var(--font);font-size:10px;letter-spacing:.08em;cursor:pointer}
+.morebtn:hover{border-color:var(--acc2);color:var(--acc2)}
+.pill.hidden{display:none}
+.hint{font-size:10px;color:var(--txt3);margin-top:8px;letter-spacing:.02em}
+.refresh-btn{background:none;border:1px solid var(--line2);border-radius:var(--r);color:var(--txt2);font-family:var(--font);font-size:10px;letter-spacing:.08em;padding:5px 10px;cursor:pointer}
+.refresh-btn:hover{border-color:var(--acc2);color:var(--acc2)}
+
+/* ── Responsive ── */
+@media(max-width:500px){
+  .entry-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+  .page{padding:16px 12px}
+  .mact-row{gap:5px}
+}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">Manga<span>Tracker</span></div>
+  <span class="hchip" id="hdr-count"></span>
+  <div class="sync-chip">
+    <span class="sync-dot" id="sdot"></span>
+    <span id="slabel">Not signed in</span>
+  </div>
+  <button class="refresh-btn" id="refresh-btn" style="display:none" title="Fetch the latest from the cloud">Refresh</button>
+  <button class="savebtn" id="signout-btn" style="width:auto;padding:5px 12px;margin:0;display:none">Sign out</button>
+</div>
+
+<!-- Auth screen -->
+<div class="page" id="auth-screen">
+  <div class="auth-wrap">
+    <div class="card">
+      <div class="card-title">Sign in to your library</div>
+      <div class="card-sub">Enter the same email you use in the extension.</div>
+      <div class="field">
+        <label class="flabel">Email</label>
+        <input class="finput" id="auth-email" type="email" placeholder="you@example.com" autocomplete="off">
+      </div>
+      <button class="savebtn" id="auth-btn">Sign in / Register</button>
+      <div class="err-msg" id="auth-err"></div>
+    </div>
+    <div style="text-align:center;margin-top:16px;font-size:9px;color:var(--txt3);letter-spacing:.06em">
+      There's no password — your email is only used as an ID for your library.<br>Anyone who knows it can access this list.
+    </div>
+  </div>
+</div>
+
+<!-- Main app -->
+<div class="page" id="main-screen" style="display:none">
+  <div class="tabs">
+    <button class="tab active" data-tab="library">Library</button>
+    <button class="tab" data-tab="schedule">Schedule</button>
+    <button class="tab" data-tab="sites">Sites</button>
+    <button class="tab" data-tab="add">+ Add</button>
+  </div>
+
+  <!-- Library -->
+  <div class="panel active" id="tab-library">
+    <div class="libctrl">
+      <div class="swrap">
+        <svg class="si" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input class="searchbox" id="lib-search" placeholder="Search titles, genres…" type="search">
+      </div>
+      <select class="fsel-sm" id="lib-type">
+        <option value="">All types</option>
+      </select>
+      <select class="fsel-sm" id="lib-status">
+        <option value="">All</option>
+        <option value="following">Following</option>
+        <option value="cooking">Cooking</option>
+        <option value="paused">Paused</option>
+        <option value="completed">Completed</option>
+        <option value="hiatus">Hiatus</option>
+        <option value="season_end">Season end</option>
+        <option value="dropped">Dropped</option>
+      </select>
+    </div>
+    <div class="libcount" id="lib-count"></div>
+    <div class="entry-grid" id="lib-grid"></div>
+  </div>
+
+  <!-- Schedule -->
+  <div class="panel" id="tab-schedule">
+    <div class="week-grid" id="week-grid"></div>
+  </div>
+
+  <!-- Sites -->
+  <div class="panel" id="tab-sites">
+    <div class="site-grid" id="sites-grid"></div>
+  </div>
+
+  <!-- Add / Edit -->
+  <div class="panel" id="tab-add">
+    <div id="add-form-wrap">
+      <!-- form injected by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal" id="modal-inner"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="shared/mt-model.js"></script>
+<script src="shared/mt-schedule.js"></script>
+<script src="shared/mt-cloud.js"></script>
+<script>
+// ── FIREBASE CONFIG ───────────────────────────────────────────────────────────
+const FB_API_KEY = 'AIzaSyB38aVbF-2p7jxiXEiR2eQkv1b2FIbyEj0';
+const FB_PROJECT = 'mangatracker-15917';
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared with the extension (docs/shared/*.js are identical copies of extension/src/shared/*.js):
+// types, modes, statuses, genres, schedule rules and the cloud-sync client.
+
+const DAYS_FULL = MTSchedule.DAYS_FULL, DAYS_SHORT = MTSchedule.DAYS;
+const Schedule = MTSchedule;
+const PAGE_SIZE = 60;
+
+// Same ordinal helper the extension uses.
+function ordinal(n){ const s=['th','st','nd','rd'], v=n%100; return n + (s[(v-20)%10] || s[v] || s[0]); }
+
+let _docKey   = null;
+let _entries  = [];
+let _tombs    = {};      // ids of deleted entries (so deletions sync between devices)
+let _rev      = null;    // revision of the cloud copy we last merged
+let _search   = '', _type = '', _status = '';
+let _shown    = PAGE_SIZE;
+let _editId   = null;    // null = adding new, string = editing existing
+let _running  = false, _again = false;
+
+// ── Utils ─────────────────────────────────────────────────────────────────────
+function $(id){ return document.getElementById(id); }
+function esc(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+function chLbl(e){ return MTModel.chLabel(e); }
+function genId(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function icon(e){ return MTModel.typeIcon(e.type); }
+
+function toast(msg, dur=2200){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'),dur);
+}
+
+function setSyncStatus(state, label){
+  const dot=$('sdot'), lbl=$('slabel');
+  dot.className='sync-dot'+(state?' '+state:'');
+  lbl.textContent=label;
+}
+
+function statusText(e){
+  const st = MTModel.statusLabel(e.status||'ongoing').toLowerCase();
+  if(e.mode==='paused')  return (e.status && e.status!=='ongoing') ? `paused (${st})` : 'paused';
+  if(e.mode==='cooking') return 'cooking';
+  return st;
+}
+
+function updateCounts(){
+  const n=_entries.length;
+  $('hdr-count').textContent = `${n} ${n===1?'title':'titles'}`;
+}
+
+// ── Cloud sync (shared client; see shared/mt-cloud.js) ────────────────────────
+// Big libraries are split into parts under Firestore's 1 MiB limit, and every
+// sync merges with the cloud copy first, so edits made in the extension and
+// here no longer overwrite each other.
+const cloud = MTCloud.createClient({
+  apiKey: FB_API_KEY, projectId: FB_PROJECT,
+  tokenStore: {
+    load: async () => { try { return JSON.parse(sessionStorage.getItem('mt_tok')||'null'); } catch { return null; } },
+    save: async t  => { try { sessionStorage.setItem('mt_tok', JSON.stringify(t)); } catch {} },
+  },
+});
+
+async function makeDocKey(email){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.toLowerCase().trim()));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,32);
+}
+function isValidEmail(email){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+
+async function syncNow({ force=false, quiet=false } = {}){
+  if(!_docKey) return null;
+  if(_running){ _again=true; return null; }
+  _running = true;
+  if(!quiet) setSyncStatus('busy','Syncing…');
+  try{
+    const r = await cloud.sync(_docKey, { entries:_entries, tombstones:_tombs, settings:null }, { lastRemoteRev:_rev, force });
+    // Merge again with the *current* in-memory library, in case you edited while the request was in flight.
+    const merged = MTCloud.mergeLibraries({ entries:_entries, tombstones:_tombs }, { entries:r.entries, tombstones:r.tombstones });
+    const changed = merged.entries.length!==_entries.length || r.remoteRead;
+    _entries = merged.entries; _tombs = merged.tombstones; _rev = r.rev;
+    updateCounts();
+    if(changed && $('main-screen').style.display!=='none' && _editId===null && !document.querySelector('#tab-add.active')) renderAll();
+    setSyncStatus('ok', `Synced ✓ ${new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`);
+    return r;
+  } catch(e){
+    setSyncStatus('err','Sync problem');
+    toast('Sync failed: ' + e.message, 7000);
+    console.error('[MangaTracker] sync failed:', e);
+    return null;
+  } finally {
+    _running = false;
+    if(_again){ _again=false; syncNow({quiet:true}); }
+  }
+}
+// Existing call sites say `await cloudSave()` after any change.
+function cloudSave(){ return syncNow(); }
+
+// Cheap "has anything changed in the cloud?" check — used when you come back to the tab.
+async function refreshIfChanged(){
+  if(!_docKey || _running) return;
+  try{
+    const rev = await cloud.peek(_docKey);
+    if(rev && rev!==_rev) await syncNow({quiet:true});
+  }catch(_){ /* try again next time */ }
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function signIn(){
+  const email = $('auth-email').value.trim();
+  const errEl = $('auth-err');
+  errEl.style.display = 'none';
+  if(!email || !isValidEmail(email)){ errEl.textContent='Enter a valid email.'; errEl.style.display=''; return; }
+  const btn = $('auth-btn');
+  btn.disabled=true; btn.textContent='Signing in…';
+  setSyncStatus('busy','Connecting…');
+  try{
+    await cloud.ensureToken(false);
+    _docKey = await makeDocKey(email);
+    sessionStorage.setItem('mt_user', email);
+    _entries = []; _tombs = {}; _rev = null;
+    const r = await syncNow({ force:true });
+    if(!r) throw new Error('Could not load your library — see the message above.');
+    setSyncStatus('ok', `Signed in as ${email}`);
+    $('signout-btn').style.display='';
+    $('refresh-btn').style.display='';
+    $('auth-screen').style.display='none';
+    $('main-screen').style.display='';
+    renderAll();
+  }catch(e){
+    errEl.textContent = e.message;
+    errEl.style.display='';
+    setSyncStatus('err','Error');
+    _docKey = null;
+  }
+  btn.disabled=false; btn.textContent='Sign in / Register';
+}
+
+function signOut(){
+  _docKey=null; _entries=[]; _tombs={}; _rev=null;
+  sessionStorage.removeItem('mt_user'); sessionStorage.removeItem('mt_tok');
+  setSyncStatus('','Not signed in');
+  $('signout-btn').style.display='none';
+  $('refresh-btn').style.display='none';
+  $('auth-screen').style.display='';
+  $('main-screen').style.display='none';
+  $('hdr-count').textContent='';
+}
+
+// ── Filtering ─────────────────────────────────────────────────────────────────
+function filtered(){
+  const q=_search.toLowerCase();
+  return _entries.filter(e=>{
+    if(q){
+      const hit = (e.title||'').toLowerCase().includes(q)
+        || (e.altNames||[]).some(n=>n.toLowerCase().includes(q))
+        || (e.tropes||[]).some(t=>t.toLowerCase().includes(q));
+      if(!hit) return false;
+    }
+    if(_type && e.type!==_type) return false;
+    switch(_status){
+      case 'following': if(e.mode!=='following') return false; break;
+      case 'cooking':   if(e.mode!=='cooking')   return false; break;
+      case 'paused':    if(e.mode!=='paused')    return false; break;
+      case 'completed': if(e.status!=='completed') return false; break;
+      case 'hiatus':    if(e.status!=='hiatus')    return false; break;
+      case 'season_end':if(e.status!=='season_end')return false; break;
+      case 'dropped':   if(e.status!=='dropped')   return false; break;
+    }
+    return true;
+  });
+}
+
+function artSrc(e){ return e.imageData || e.image || ''; }
+
+function artCard(e){
+  const src = artSrc(e);
+  return src
+    ? `<div class="ecard-art"><img src="${esc(src)}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='${icon(e)}'"></div>`
+    : `<div class="ecard-art">${icon(e)}</div>`;
+}
+
+function statusTag(e){
+  if(e.status==='dropped')    return `<span class="stag stag-drop">dropped</span>`;
+  if(e.mode==='paused')       return `<span class="stag stag-pause">${esc(statusText(e))}</span>`;
+  if(e.mode==='cooking')      return `<span class="stag stag-cook">cooking</span>`;
+  if(e.status==='completed')  return `<span class="stag stag-done">completed</span>`;
+  if(e.status==='hiatus')     return `<span class="stag stag-done">hiatus</span>`;
+  if(e.status==='season_end') return `<span class="stag stag-done">season end</span>`;
+  return `<span class="stag stag-on">following</span>`;
+}
+
+// ── Library ───────────────────────────────────────────────────────────────────
+function renderLibrary(){
+  const grid = $('lib-grid');
+  const all = filtered();
+  const es = all.slice(0,_shown);
+  const total=_entries.length;
+  $('lib-count').textContent = all.length!==total
+    ? `Showing ${es.length} of ${all.length} matching · ${total} ${total===1?'title':'titles'} in total`
+    : `${total} ${total===1?'title':'titles'}`;
+  if(!all.length){
+    grid.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-icon">📚</div>${total?'No matches.':'Your library is empty. Tap + Add to get started.'}</div>`;
+    return;
+  }
+  grid.innerHTML = es.map(e=>`
+    <div class="ecard" data-id="${esc(e.id)}">
+      ${artCard(e)}
+      <div class="ecard-body">
+        <div class="ecard-title">${esc(e.title)}</div>
+        <div class="ecard-meta">${esc(e.type)}${e.tropes&&e.tropes.length?' · '+esc(e.tropes.slice(0,2).join(', ')):''}
+        </div>
+        <div class="ecard-ch">${chLbl(e)} ${e.chapter||0}</div>
+        ${statusTag(e)}
+      </div>
+    </div>`).join('') +
+    (all.length>es.length ? `<button class="morebtn" id="more-lib" style="grid-column:1/-1">Show ${Math.min(PAGE_SIZE, all.length-es.length)} more (${all.length-es.length} left)</button>` : '');
+  grid.querySelectorAll('.ecard').forEach(c=>c.addEventListener('click',()=>openDetail(c.dataset.id)));
+  $('more-lib')?.addEventListener('click',()=>{ _shown+=PAGE_SIZE; renderLibrary(); });
+}
+
+// ── Schedule ──────────────────────────────────────────────────────────────────
+function scheduleRow(e){
+  const src=artSrc(e);
+  const artInner=src?`<img src="${esc(src)}" alt="" loading="lazy" decoding="async" onerror="this.parentElement.innerHTML='${icon(e)}'">`:icon(e);
+  return `<div class="srow" data-id="${esc(e.id)}">
+    <div class="srow-art">${artInner}</div>
+    <span class="srow-title">${esc(e.title)}</span>
+    <span class="srow-ch">${chLbl(e)} ${e.chapter||0}</span>
+  </div>`;
+}
+
+function renderSchedule(){
+  const grid = $('week-grid');
+  const today = new Date();
+  let html='';
+  for(let i=-2;i<=6;i++){
+    const d=new Date(today); d.setDate(today.getDate()+i);
+    const dayIdx=d.getDay();
+    const releases=_entries.filter(e=>Schedule.isReleaseOnDate(e, d));
+    if(!releases.length) continue;
+    const isToday=i===0;
+    const dateStr=`${DAYS_FULL[dayIdx]} ${d.getDate()} ${d.toLocaleString('default',{month:'short'})}`;
+    html+=`<div class="day-block${isToday?' day-today':''}">
+      <div class="day-head"><span>${isToday?'Today — '+dateStr:dateStr}</span><span>${releases.length} release${releases.length!==1?'s':''}</span></div>
+      <div class="day-entries">${releases.map(scheduleRow).join('')}</div>
+    </div>`;
+  }
+  if(!html) html=`<div class="empty"><div class="empty-icon">📅</div>No releases this week.</div>`;
+
+  // Irregular entries (weekly or monthly) have no fixed date — list them separately.
+  const irregular = _entries.filter(e => Schedule.isIrregular(e) && Schedule.isTracking(e) && e.mode!=='cooking');
+  if(irregular.length){
+    html += `<div class="day-block">
+      <div class="day-head"><span>Irregular schedule</span><span>${irregular.length} title${irregular.length!==1?'s':''}</span></div>
+      <div class="day-entries">${irregular.map(scheduleRow).join('')}</div>
+    </div>`;
+  }
+  const paused = _entries.filter(e => e.mode==='paused' && e.status!=='dropped');
+  if(paused.length){
+    html += `<div class="day-block">
+      <div class="day-head"><span>Paused</span><span>${paused.length} title${paused.length!==1?'s':''}</span></div>
+      <div class="day-entries">${paused.slice(0,10).map(scheduleRow).join('')}</div>
+    </div>`;
+  }
+  grid.innerHTML=html;
+  grid.querySelectorAll('.srow').forEach(r=>r.addEventListener('click',()=>openDetail(r.dataset.id)));
+}
+
+// ── Sites ─────────────────────────────────────────────────────────────────────
+function renderSites(){
+  const grid=$('sites-grid');
+  const map={};
+  _entries.forEach(e=>{ if(!e.hostname) return; map[e.hostname]=(map[e.hostname]||0)+1; });
+  const pal=[
+    {bg:'#7c6af720',fg:'var(--acc2)'},{bg:'#3ecf8e20',fg:'var(--green)'},
+    {bg:'#f0a04b20',fg:'var(--amber)'},{bg:'#e06b6b20',fg:'var(--red)'}
+  ];
+  const entries=Object.entries(map);
+  if(!entries.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🌐</div>No sites yet.</div>`; return; }
+  grid.innerHTML=entries.map(([host,cnt],i)=>{
+    const c=pal[i%pal.length];
+    return `<div class="site-card">
+      <div class="site-icon" style="background:${c.bg};color:${c.fg}">${esc(host.slice(0,2).toUpperCase())}</div>
+      <div class="site-name">${esc(host)}</div>
+      <div class="site-cnt">${cnt} title${cnt!==1?'s':''}</div>
+    </div>`;
+  }).join('');
+}
+
+// Only the visible tab is drawn; the others are drawn when opened.
+function renderAll(){
+  updateCounts();
+  const active = document.querySelector('.tab.active')?.dataset.tab || 'library';
+  if(active==='library') renderLibrary();
+  if(active==='schedule') renderSchedule();
+  if(active==='sites') renderSites();
+}
+
+// ── Detail modal ──────────────────────────────────────────────────────────────
+function scheduleSummary(e){
+  if(Schedule.isIrregular(e)) return e.releaseType==='monthly' ? 'Monthly · irregular' : 'Irregular';
+  if(e.releaseType==='monthly') return e.releaseDayOfMonth ? `Monthly · ${ordinal(e.releaseDayOfMonth)}` : 'unknown';
+  return e.releaseDays && e.releaseDays.length ? e.releaseDays.map(d=>DAYS_SHORT[d]).join(', ') : 'unknown';
+}
+
+function openDetail(id){
+  const e=_entries.find(x=>x.id===id); if(!e) return;
+  const src=artSrc(e);
+  const artEl=src
+    ? `<div class="modal-art"><img src="${esc(src)}" alt="" onerror="this.parentElement.innerHTML='${icon(e)}'"></div>`
+    : `<div class="modal-art">${icon(e)}</div>`;
+  const lastRead=e.lastRead?new Date(e.lastRead).toLocaleDateString():'never';
+  const isPaused = e.mode==='paused';
+  let tempCh = e.chapter || 0;
+
+  $('modal-inner').innerHTML=`
+    <div class="modal-header">
+      ${artEl}
+      <div class="modal-info">
+        <div class="modal-title">${esc(e.title)}</div>
+        <div class="modal-site">${esc(e.hostname||'')} · ${esc(e.type)}</div>
+      </div>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="ch-ctrl">
+        <span class="ch-label">${chLbl(e).toUpperCase()}</span>
+        <button class="ch-btn" id="m-chdec">−</button>
+        <span class="ch-num" id="m-chnum">${tempCh}</span>
+        <button class="ch-btn" id="m-chinc">+</button>
+        <button class="mact primary" id="m-markread" style="flex:0;white-space:nowrap;padding:6px 12px">Mark read</button>
+      </div>
+      <div class="mstat">
+        <div class="mstat-card"><div class="mstat-label">Status</div><div class="mstat-val">${esc(statusText(e))}</div></div>
+        <div class="mstat-card"><div class="mstat-label">Last read</div><div class="mstat-val" style="font-size:10px">${lastRead}</div></div>
+        <div class="mstat-card"><div class="mstat-label">Schedule</div><div class="mstat-val" style="font-size:10px">${esc(scheduleSummary(e))}</div></div>
+        <div class="mstat-card"><div class="mstat-label">Vibe</div><div class="mstat-val" style="font-size:10px">${esc((e.vibes||[]).join(', ')||'—')}</div></div>
+      </div>
+      <div class="mtags">${esc((e.tropes||[]).join(', ')||'—')}</div>
+      <div class="mact-row">
+        <button class="mact" id="m-edit">Edit</button>
+        <button class="mact" id="m-pause">${isPaused?'Resume':'Pause'}</button>
+        ${e.url?`<button class="mact primary" id="m-open">Open site</button>`:''}
+        <button class="mact danger" id="m-delete">Delete</button>
+      </div>
+      ${e.notes?`<div class="mnotes">${esc(e.notes)}</div>`:''}
+    </div>`;
+
+  $('m-chdec').addEventListener('click',()=>{ if(tempCh>0){tempCh--; $('m-chnum').textContent=tempCh;} });
+  $('m-chinc').addEventListener('click',()=>{ tempCh++; $('m-chnum').textContent=tempCh; });
+  $('m-markread').addEventListener('click', async ()=>{
+    e.chapter=tempCh; e.lastRead=Date.now();
+    saveEntryLocally(e);
+    closeModal(); renderAll();
+    toast(`Marked ${chLbl(e)} ${tempCh}`);
+    await cloudSave();
+  });
+  $('m-pause').addEventListener('click', async ()=>{
+    const previous={...e};
+    e.mode = isPaused ? 'following' : 'paused';
+    MTModel.stampModeChange(e, previous);
+    saveEntryLocally(e);
+    closeModal(); renderAll();
+    toast(isPaused?'Resumed':'Paused');
+    await cloudSave();
+  });
+  $('modal-close').addEventListener('click', closeModal);
+  $('m-edit')?.addEventListener('click',()=>{ closeModal(); openEditForm(e.id); });
+  $('m-open')?.addEventListener('click',()=>{ if(e.url) window.open(e.url,'_blank','noopener'); });
+  $('m-delete').addEventListener('click', async ()=>{
+    if(!confirm(`Delete "${e.title}"?`)) return;
+    _entries = _entries.filter(x=>x.id!==e.id);
+    _tombs[e.id] = Date.now();        // remembered so the deletion reaches your other devices
+    closeModal(); renderAll();
+    toast('Deleted');
+    await cloudSave();
+  });
+  $('modal-bg').classList.add('open');
+}
+
+function closeModal(){ $('modal-bg').classList.remove('open'); }
+
+function saveEntryLocally(entry){
+  entry.updatedAt = Date.now();       // newest edit wins when devices merge
+  const idx = _entries.findIndex(e=>e.id===entry.id);
+  if(idx>=0) _entries[idx]=entry; else _entries.unshift(entry);
+  updateCounts();
+}
+
+// ── Add / Edit form ───────────────────────────────────────────────────────────
+function buildAddForm(entry=null){
+  const isEdit = !!entry;
+  const e = entry || {};
+  const wrap = $('add-form-wrap');
+  const monthly = e.releaseType==='monthly';
+  const monthlyIrregular = monthly && e.releaseFreq===0;
+  const weeklyFreq = monthly ? 1 : (e.releaseFreq ?? 1);
+
+  const dayChips = DAYS_SHORT.map((d,i)=>`
+    <button class="pill dchip${(e.releaseDays||[]).includes(i)?' on':''}" data-day="${i}">${d}</button>`).join('');
+
+  // Built-in list + every genre already used on any entry (so ones typed in the
+  // extension, and your own, are never lost when you edit an entry here).
+  const genres = MTModel.unionGenres(MTModel.DEFAULT_GENRES, _entries.flatMap(x=>x.tropes||[]), e.tropes||[]);
+  const ticked = (e.tropes||[]).map(t=>t.toLowerCase());
+  const genrePills = genres.map(g=>`
+    <button class="pill gchip${ticked.includes(g.toLowerCase())?' on':''}" data-val="${esc(g)}">${esc(g)}</button>`).join('');
+
+  const single = (cls, list, current) => list.map(o=>`<button class="pill ${cls}${current===o.id?' on':''}" data-val="${o.id}">${esc(o.label)}</button>`).join('');
+
+  wrap.innerHTML = `
+    <div class="form-section">
+      <div class="form-section-title">${isEdit ? 'Edit entry' : 'Add new entry'}</div>
+
+      <div class="field">
+        <label class="flabel">Title</label>
+        <input class="finput" id="f-title" type="text" placeholder="Series title" value="${esc(e.title||'')}">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div class="field" style="margin:0">
+          <label class="flabel">Type</label>
+          <select class="fsel" id="f-type">
+            ${MTModel.TYPES.map(t=>`<option value="${t.id}"${(e.type||'manhwa')===t.id?' selected':''}>${t.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field" style="margin:0">
+          <label class="flabel">Chapter / Ep.</label>
+          <input class="finput" id="f-chapter" type="number" min="0" value="${e.chapter||0}">
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="flabel">Mode <span style="text-transform:none;letter-spacing:0">— how you're reading it</span></label>
+        <div class="pills-row">${single('modepill', MTModel.MODES, e.mode||'following')}</div>
+      </div>
+
+      <div class="field">
+        <label class="flabel">Status <span style="text-transform:none;letter-spacing:0">— state of the series</span></label>
+        <div class="pills-row">${single('statpill', MTModel.STATUSES, e.status||'ongoing')}</div>
+      </div>
+
+      <div class="field">
+        <label class="flabel">Release schedule</label>
+        <div class="pills-row" id="schedtype-pills">
+          <button class="pill schedtypepill${!monthly?' on':''}" data-val="weekly">Weekly</button>
+          <button class="pill schedtypepill${monthly?' on':''}" data-val="monthly">Monthly</button>
+        </div>
+        <div id="weekly-schedule" style="${monthly?'display:none':''}">
+          <div class="pills-row" id="freq-chips" style="margin-top:8px">
+            <button class="pill freqpill${weeklyFreq===1?' on':''}" data-freq="1">1×</button>
+            <button class="pill freqpill${weeklyFreq===2?' on':''}" data-freq="2">2×</button>
+            <button class="pill freqpill${weeklyFreq===3?' on':''}" data-freq="3">3×</button>
+            <button class="pill freqpill${weeklyFreq===0?' on':''}" data-freq="0">Irregular</button>
+          </div>
+          <div class="pills-row" id="day-chips-row" style="margin-top:8px;${weeklyFreq===0?'display:none':''}">${dayChips}</div>
+        </div>
+        <div id="monthly-schedule" style="${monthly?'':'display:none'};margin-top:8px">
+          <div class="pills-row" id="monthly-chips">
+            <button class="pill mfreqpill${!monthlyIrregular?' on':''}" data-mfreq="1">Same date</button>
+            <button class="pill mfreqpill${monthlyIrregular?' on':''}" data-mfreq="0">Irregular</button>
+          </div>
+          <div id="monthly-date" style="margin-top:8px;${monthlyIrregular?'display:none':''}">
+            <label class="flabel">Day of month</label>
+            <input class="finput" id="f-day-of-month" type="number" min="1" max="31" value="${e.releaseDayOfMonth||1}" style="max-width:90px">
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="flabel">Alternate names</label>
+        <div id="altnames-list"></div>
+        <button class="mact" id="altnames-add-btn" style="width:100%;margin-top:4px">+ Add alternate name</button>
+      </div>
+
+      <div class="field" style="margin-bottom:0">
+        <label class="flabel">Notes</label>
+        <input class="finput" id="f-notes" type="text" placeholder="Optional notes" value="${esc(e.notes||'')}">
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="form-section-title">Genres / Tropes</div>
+      <input class="finput" id="genre-search" type="search" autocomplete="off" maxlength="32" placeholder="Search genres, or type a new one and press Enter…">
+      <div class="pills-row" id="genre-pills">${genrePills}</div>
+      <div class="hint" id="genre-hint" style="display:none"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:24px">
+      <button class="savebtn" id="f-save" style="margin:0">${isEdit ? 'Update entry' : 'Save to library'}</button>
+      <button class="mact" id="f-cancel" style="flex:0;white-space:nowrap;padding:0 16px">Cancel</button>
+    </div>
+  `;
+
+  const single_select = sel => wrap.querySelectorAll(sel).forEach(p=>p.addEventListener('click',()=>{
+    wrap.querySelectorAll(sel).forEach(x=>x.classList.remove('on')); p.classList.add('on');
+  }));
+  single_select('.modepill'); single_select('.statpill');
+
+  wrap.querySelectorAll('.dchip').forEach(p=>p.addEventListener('click',()=>p.classList.toggle('on')));
+  wrap.querySelectorAll('.freqpill').forEach(p=>{
+    p.addEventListener('click',()=>{
+      wrap.querySelectorAll('.freqpill').forEach(x=>x.classList.remove('on'));
+      p.classList.add('on');
+      const irregular = p.dataset.freq==='0';
+      $('day-chips-row').style.display = irregular ? 'none' : '';
+      if(irregular) wrap.querySelectorAll('.dchip.on').forEach(d=>d.classList.remove('on'));
+    });
+  });
+  wrap.querySelectorAll('.schedtypepill').forEach(p=>{
+    p.addEventListener('click',()=>{
+      wrap.querySelectorAll('.schedtypepill').forEach(x=>x.classList.remove('on'));
+      p.classList.add('on');
+      const isMonthly = p.dataset.val==='monthly';
+      $('weekly-schedule').style.display  = isMonthly ? 'none' : '';
+      $('monthly-schedule').style.display = isMonthly ? '' : 'none';
+    });
+  });
+  wrap.querySelectorAll('.mfreqpill').forEach(p=>{
+    p.addEventListener('click',()=>{
+      wrap.querySelectorAll('.mfreqpill').forEach(x=>x.classList.remove('on'));
+      p.classList.add('on');
+      $('monthly-date').style.display = p.dataset.mfreq==='0' ? 'none' : '';
+    });
+  });
+
+  // ── Genre search: type to narrow the list; Enter ticks the exact match or adds a new genre
+  const gSearch=$('genre-search'), gPills=$('genre-pills'), gHint=$('genre-hint');
+  const bindGenre = p => p.addEventListener('click',()=>p.classList.toggle('on'));
+  gPills.querySelectorAll('.gchip').forEach(bindGenre);
+  function genreFilter(){
+    const q=gSearch.value.trim();
+    const all=[...gPills.querySelectorAll('.gchip')];
+    let matches=0;
+    all.forEach(p=>{
+      const hit=MTModel.matchesQuery(p.textContent,q);
+      if(hit) matches++;
+      p.classList.toggle('hidden', !(hit || p.classList.contains('on')));   // ticked ones stay visible
+    });
+    if(!q){ gHint.style.display='none'; return; }
+    const exact=all.find(p=>p.textContent.trim().toLowerCase()===q.toLowerCase());
+    gHint.style.display='';
+    gHint.textContent = exact
+      ? `“${exact.textContent.trim()}” is in the list — press Enter to ${exact.classList.contains('on')?'untick':'tick'} it.`
+      : matches ? `${matches} match${matches===1?'':'es'} — or press Enter to add “${q}” as a new genre.`
+                : `No match — press Enter to add “${q}” as a new genre.`;
+  }
+  gSearch.addEventListener('input', genreFilter);
+  gSearch.addEventListener('keydown', ev=>{
+    if(ev.key!=='Enter') return;
+    ev.preventDefault();
+    const q=gSearch.value.trim(); if(!q) return;
+    const exact=[...gPills.querySelectorAll('.gchip')].find(p=>p.textContent.trim().toLowerCase()===q.toLowerCase());
+    if(exact) exact.classList.toggle('on');
+    else {
+      const b=document.createElement('button');
+      b.className='pill gchip on'; b.dataset.val=q; b.textContent=q; bindGenre(b); gPills.appendChild(b);
+    }
+    gSearch.value=''; genreFilter();
+  });
+
+  // ── Alternate names
+  function buildAltNameRow(value=''){
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+    row.innerHTML = `
+      <input class="finput" type="text" placeholder="Alternate title…" value="${esc(value)}" style="flex:1;margin:0">
+      <button class="mact" style="flex:0;padding:0 10px" title="Remove">✕</button>`;
+    row.querySelector('button').addEventListener('click', ()=>row.remove());
+    return row;
+  }
+  const altList = $('altnames-list');
+  (e.altNames||[]).forEach(n => altList.appendChild(buildAltNameRow(n)));
+  $('altnames-add-btn').addEventListener('click', ()=>{
+    const row = buildAltNameRow(''); altList.appendChild(row); row.querySelector('input').focus();
+  });
+
+  // ── Save
+  $('f-save').addEventListener('click', async ()=>{
+    const title = $('f-title').value.trim();
+    if(!title){ toast('Enter a title'); return; }
+    const mode   = wrap.querySelector('.modepill.on')?.dataset.val || 'following';
+    const status = wrap.querySelector('.statpill.on')?.dataset.val || 'ongoing';
+    const releaseType = wrap.querySelector('.schedtypepill.on')?.dataset.val || 'weekly';
+    let releaseDays = [], releaseDayOfMonth = null, releaseFreq = 1;
+    if(releaseType==='monthly'){
+      if(wrap.querySelector('.mfreqpill.on')?.dataset.mfreq==='0'){ releaseFreq = 0; }     // irregular monthly
+      else releaseDayOfMonth = Math.min(Math.max(parseInt($('f-day-of-month').value||'1')||1, 1), 31);
+    } else {
+      releaseFreq = parseInt(wrap.querySelector('.freqpill.on')?.dataset.freq ?? '1');
+      if(releaseFreq!==0){
+        releaseDays = [...wrap.querySelectorAll('.dchip.on')].map(p=>parseInt(p.dataset.day));
+        if(!releaseDays.length) releaseDays = [new Date().getDay()];
+      }
+    }
+    const altNames = [...altList.querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);
+    const tropes   = [...gPills.querySelectorAll('.gchip.on')].map(p=>p.dataset.val);
+    const newEntry = {
+      ...(isEdit ? e : {}),          // keeps every field the web form doesn't show (covers, sources, vibes, pausedAt …)
+      id:      isEdit ? e.id : genId(),
+      title,
+      type:    $('f-type').value,
+      chapter: parseInt($('f-chapter').value)||0,
+      notes:   $('f-notes').value.trim(),
+      mode, status, releaseType, releaseDays, releaseFreq, releaseDayOfMonth, altNames, tropes,
+      savedAt: Date.now(),
+      lastRead: isEdit ? (e.lastRead||Date.now()) : Date.now(),
+      url: e.url||'', hostname: e.hostname||'', image: e.image||'', imageData: e.imageData||'',
+      vibes: e.vibes||[], sources: e.sources||[],
+    };
+    MTModel.stampModeChange(newEntry, isEdit ? e : null);
+    saveEntryLocally(newEntry);
+    _editId = null;
+    switchTab('library');
+    toast(isEdit ? 'Updated ✓' : 'Added to library ✓');
+    await cloudSave();
+  });
+  $('f-cancel').addEventListener('click',()=>{ _editId=null; switchTab('library'); });
+}
+
+function openEditForm(id){
+  _editId = id;
+  const entry = _entries.find(e=>e.id===id);
+  switchTab('add');
+  buildAddForm(entry);
+}
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+function switchTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  const tabEl = document.querySelector(`.tab[data-tab="${name}"]`);
+  if(tabEl) tabEl.classList.add('active');
+  const panelEl = $('tab-'+name);
+  if(panelEl) panelEl.classList.add('active');
+  if(name==='add'){ if(!_editId) buildAddForm(null); }
+  else renderAll();
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+$('lib-type').insertAdjacentHTML('beforeend', MTModel.TYPES.map(t=>`<option value="${t.id}">${t.label}</option>`).join(''));
+$('auth-btn').addEventListener('click', signIn);
+$('auth-email').addEventListener('keydown',e=>{ if(e.key==='Enter') signIn(); });
+$('signout-btn').addEventListener('click', signOut);
+$('refresh-btn').addEventListener('click', async ()=>{ const r=await syncNow({force:true}); if(r){ renderAll(); toast('Refreshed'); } });
+$('modal-bg').addEventListener('click',e=>{ if(e.target===$('modal-bg')) closeModal(); });
+
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{ _editId=null; switchTab(tab.dataset.tab); });
+});
+
+let _searchTimer=null;
+$('lib-search').addEventListener('input',e=>{
+  clearTimeout(_searchTimer); const v=e.target.value;
+  _searchTimer=setTimeout(()=>{ _search=v; _shown=PAGE_SIZE; renderLibrary(); },150);
+});
+$('lib-type').addEventListener('change',e=>{ _type=e.target.value; _shown=PAGE_SIZE; renderLibrary(); });
+$('lib-status').addEventListener('change',e=>{ _status=e.target.value; _shown=PAGE_SIZE; renderLibrary(); });
+
+// Pick up changes made in the extension (or on another device) when you come back to this tab.
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') refreshIfChanged(); });
+setInterval(()=>{ if(document.visibilityState==='visible') refreshIfChanged(); }, 90000);
+
+// Reloading the page keeps you signed in for the tab's lifetime.
+(function restore(){
+  const email = sessionStorage.getItem('mt_user');
+  if(email){ $('auth-email').value = email; signIn(); }
+})();
+</script>
+</body>
+</html>

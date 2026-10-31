@@ -1,0 +1,15 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each library lives in a few documents named after a hash of the email
+    // (mt_users/<hash> and mt_users/<hash>-c0, -c1, …).
+    match /mt_users/{docId} {
+      // Anyone signed in (anonymously is enough) can read/write a document
+      // IF they already know its name. They cannot LIST the collection, so
+      // nobody can browse other people's libraries — they would have to
+      // guess the hash of an email address.
+      allow get, create, update, delete: if request.auth != null;
+      allow list: if false;
+    }
+  }
+}
