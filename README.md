@@ -1,10 +1,26 @@
 # MangaTracker
 
-Keep track of the manhwa, manga, manhua, webtoons, anime and novels you read, **across any website**.
+A reading list that follows you from site to site.
 
-- A **browser extension** sits in a side panel next to whatever you're reading. It spots the series on the page, remembers where you got to, and tells you what's new today.
-- A **web app** shows the same library on your phone or any other computer.
-- Both stay in step through a free **Firebase** database that you own. No account with us, no password, no ads, no tracking.
+## Why I built it
+
+I read a lot. Manhwa, manga, anime — and across a lot of sites. One site has the series I'm following. Another has the one I dropped last week. A third has the one I picked up today. Each site has its own list, and each list has its own way of forgetting you.
+
+The part that got to me was losing my place. I'd be tracking a series on one site, the site would refresh or reset, and just like that I no longer knew where I was. Now spread that across a few hundred series and a handful of sites. It stops being a small annoyance.
+
+So I built MangaTracker. One list, kept in one place, that goes wherever I read. That was the first goal.
+
+The second goal was there before I'd written any code. I've always found it hard to find new things to read and watch. If I could see everything I read, along with every site it lives on, maybe I'd spot a pattern — how sites name their series, how they present themselves — and that pattern could lead me to new series and new sites. The ones I haven't read yet. The ones I read a while back and can't name anymore. That part isn't built yet. The [roadmap](ROADMAP.md) has some early ideas on how to get there.
+
+What I want is simple. Less time keeping score, more time getting lost in someone else's world.
+
+---
+
+## What it is
+
+MangaTracker is two things that share one library. A **browser extension** sits in a side panel next to whatever you're reading. It spots the series on the page, remembers where you got to, and shows you what's out today. A **web app** shows the same library on your phone or any other computer.
+
+They stay in step through a free **Firebase** database that you own. There's no MangaTracker account, no password, no ads and no tracking.
 
 > **In a hurry?** Jump to [Quick start](#quick-start-no-technical-knowledge-needed).
 > **Developer?** Jump to [For developers](#for-developers).
@@ -25,18 +41,17 @@ Keep track of the manhwa, manga, manhua, webtoons, anime and novels you read, **
 
 ## What it can do
 
-| | |
-|---|---|
-| **Recognises the page** | Reads the title, cover picture, chapter number, genres and *what kind of series it is* (manhwa, manga, manhua, webtoon, anime, donghua, novel) from the page you're on. |
-| **Knows what you already have** | If you open a series that's already in your library, a card says so and offers *Mark ch. 212 read*. It also recognises the same series on a different site, or under a different title (alternate names). |
-| **Shows what's new today** | *Today* and *Week* views list what releases when. Schedules can be **weekly** (pick days), **monthly** (a fixed date) or **irregular** (no predictable date) — weekly *and* monthly entries can be irregular. |
-| **Three ways of reading** | **Following** (read as it comes out), **Cooking** (let chapters pile up, then binge) and **Paused** (set aside on purpose — works for finished series too). |
-| **Series status** | Ongoing, Completed, Hiatus, Season End, Dropped. Status describes the *series*; the reading mode describes *you*. So "completed, but I'm paused halfway through" is simply Completed + Paused. |
-| **Searchable genres** | Type in the genre box to narrow the list; press Enter to tick a match, or to add your own new genre. |
-| **Library tools** | Search (titles, alternate names, genres, sites), filter by type and state, group by site, total count always visible. |
-| **Several sources per series** | Keep more than one site for the same series and choose a primary. |
-| **Sync** | Changes in the extension appear in the web app and vice versa. Edits made on two devices are merged, not overwritten. |
-| **Backup** | *Settings → Export* saves everything as one file. |
+**It reads the page for you.** Open a series and MangaTracker picks up the title, the cover, the chapter you're on, the genres, and what kind of thing it is — manhwa, manga, manhua, webtoon, anime, donghua or novel. If the series is already in your library, a small card says so and offers to mark your chapter read. It also spots the same series on a different site, or under a different name, because you can save alternate titles.
+
+**It tells you what's out today.** The Today and Week views show what releases when. A schedule can be weekly, with the days you pick. It can be monthly, on a fixed date. Or it can be irregular, for the series that never come out when they say they will — and that goes for monthly ones too.
+
+**It separates you from the series.** Your *mode* is how you're reading it: following, cooking (letting chapters pile up before a binge) or paused (set aside on purpose). The series has its own *status*: ongoing, completed, hiatus, season end or dropped. So "it's finished, I'm halfway through, and I'm taking a break" is simply Completed and Paused.
+
+**It helps you find things in your own list.** Search by title, alternate name, genre or site. Filter by type and state. Group by site. The genre box narrows as you type, and if the genre you want isn't there, press Enter and it's added. The total number of titles is always on show.
+
+**It keeps more than one source.** Save several sites for the same series and pick a main one.
+
+**It keeps your devices in step.** Changes in the extension show up in the web app, and the other way round. If you edit on two devices, the edits are merged — nothing gets overwritten. And *Settings → Export* saves everything as one backup file.
 
 ---
 
