@@ -1,0 +1,3 @@
+We need a finished mode for completed status to mark the completed ones I've actually finished, alongside the paused for the ones I am still reading.
+
+When I am in the chapter of a manhwa or manga and I want to save it, I have to go back to the entry's title page so the URL saved doesn't pick that specific chapter one, and the entry title uses the correct entry title. Is there a way for it to pick the URL for the title correctly as well as the name, and then maybe ask that I go back to the title page or so to get the image and the genres or pick those out too? What are the possible ways of making it easier to save the entry from the chapter or episode page while still getting the details correctly/well?
